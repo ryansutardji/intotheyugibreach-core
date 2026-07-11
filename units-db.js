@@ -1,0 +1,90 @@
+// Unit database for Tactics Skirmish (Yu-Gi-Oh reskin).
+// Loaded via <script> before the main game script — keep this a plain global,
+// no import/export, so the game still runs by just opening index.html.
+//
+// cost is always the monster's real Duel Monsters Level/Star rating (not an
+// independently chosen value). It is reserved for a future army-budget /
+// team-selection system and is not yet consumed by any current game logic.
+
+const UNIT_DATABASE = {
+  kuriboh: {
+    name: 'Kuriboh',
+    cost: 1,
+    hp: 20,
+    atk: 6,
+    move: 4,
+    range: 1,
+    type: 'Fiend',
+    attribute: 'DARK',
+  },
+  giant_soldier_of_stone: {
+    name: 'Giant Soldier of Stone',
+    cost: 3,
+    hp: 70,
+    atk: 11,
+    move: 2,
+    range: 1,
+    type: 'Rock',
+    attribute: 'EARTH',
+  },
+  baby_dragon: {
+    name: 'Baby Dragon',
+    cost: 3,
+    hp: 40,
+    atk: 13,
+    move: 4,
+    range: 1,
+    type: 'Dragon',
+    attribute: 'WIND',
+  },
+  celtic_guardian: {
+    name: 'Celtic Guardian',
+    cost: 4,
+    hp: 58,
+    atk: 16,
+    move: 3,
+    range: 1,
+    type: 'Warrior',
+    attribute: 'EARTH',
+  },
+  mystical_elf: {
+    name: 'Mystical Elf',
+    cost: 4,
+    hp: 80,
+    atk: 9,
+    move: 2,
+    range: 2,
+    type: 'Spellcaster',
+    attribute: 'LIGHT',
+  },
+  gemini_elf: {
+    name: 'Gemini Elf',
+    cost: 4,
+    hp: 44,
+    atk: 19,
+    move: 3,
+    range: 2,
+    type: 'Spellcaster',
+    attribute: 'EARTH',
+  },
+  gaia_fierce_knight: {
+    name: 'Gaia the Fierce Knight',
+    cost: 4,
+    hp: 60,
+    atk: 22,
+    move: 3,
+    range: 1,
+    type: 'Warrior',
+    attribute: 'EARTH',
+  },
+  dark_magician: {
+    name: 'Dark Magician',
+    cost: 7,
+    hp: 55,
+    atk: 26,
+    move: 3,
+    range: 3,
+    type: 'Spellcaster',
+    attribute: 'DARK',
+  },
+};

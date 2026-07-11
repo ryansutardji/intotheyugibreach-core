@@ -224,17 +224,18 @@
 
     <div class="panel legend">
       <h3 style="margin-bottom:6px;">LEGEND</h3>
-      <div class="legend-row"><div class="swatch" style="background:#3b82f6"></div> Your Soldier — balanced, mid range</div>
-      <div class="legend-row"><div class="swatch" style="background:#22d3ee"></div> Your Archer — frail, long range</div>
-      <div class="legend-row"><div class="swatch" style="background:#1e3a8a"></div> Your Tank — tough, slow, short range</div>
-      <div class="legend-row"><div class="swatch" style="background:#ef4444"></div> Enemy Soldier</div>
-      <div class="legend-row"><div class="swatch" style="background:#f97316"></div> Enemy Archer</div>
-      <div class="legend-row"><div class="swatch" style="background:#7f1d1d"></div> Enemy Tank</div>
+      <div class="legend-row"><div class="swatch" style="background:#3b82f6"></div> Your Gaia the Fierce Knight — balanced, mid range</div>
+      <div class="legend-row"><div class="swatch" style="background:#22d3ee"></div> Your Dark Magician — frail, long range</div>
+      <div class="legend-row"><div class="swatch" style="background:#1e3a8a"></div> Your Giant Soldier of Stone — tough, slow, short range</div>
+      <div class="legend-row"><div class="swatch" style="background:#ef4444"></div> Enemy Gaia the Fierce Knight</div>
+      <div class="legend-row"><div class="swatch" style="background:#f97316"></div> Enemy Dark Magician</div>
+      <div class="legend-row"><div class="swatch" style="background:#7f1d1d"></div> Enemy Giant Soldier of Stone</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
     </div>
   </div>
 </div>
 
+<script src="units-db.js"></script>
 <script>
 (function () {
   'use strict';
@@ -242,15 +243,9 @@
   const GRID = 8;
   const TILE = 64;
 
-  const UNIT_TYPES = {
-    soldier: { name: 'Soldier', hp: 100, atk: 20, move: 3, range: 1 },
-    archer:  { name: 'Archer',  hp: 55,  atk: 16, move: 3, range: 3 },
-    tank:    { name: 'Tank',    hp: 170, atk: 24, move: 2, range: 1 },
-  };
-
   const TEAM_COLORS = {
-    player: { soldier: '#3b82f6', archer: '#22d3ee', tank: '#1e3a8a' },
-    enemy:  { soldier: '#ef4444', archer: '#f97316', tank: '#7f1d1d' },
+    player: { gaia_fierce_knight: '#3b82f6', dark_magician: '#22d3ee', giant_soldier_of_stone: '#1e3a8a' },
+    enemy:  { gaia_fierce_knight: '#ef4444', dark_magician: '#f97316', giant_soldier_of_stone: '#7f1d1d' },
   };
 
   const canvas = document.getElementById('board');
@@ -278,10 +273,11 @@
   let attackableTargets = [];
   let hoveredTile = null;
 
-  function makeUnit(team, type, x, y) {
-    const t = UNIT_TYPES[type];
+  function makeUnit(team, unitId, x, y) {
+    const t = UNIT_DATABASE[unitId];
     return {
-      id: nextId++, team, type, x, y,
+      id: nextId++, team, unitId, x, y,
+      name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
       hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
       alive: true, hasMoved: false, turnDone: false,
     };
@@ -289,12 +285,12 @@
 
   function initUnits() {
     units = [
-      makeUnit('player', 'archer',  0, 2),
-      makeUnit('player', 'soldier', 1, 4),
-      makeUnit('player', 'tank',    0, 6),
-      makeUnit('enemy', 'tank',    7, 1),
-      makeUnit('enemy', 'soldier', 6, 3),
-      makeUnit('enemy', 'archer',  7, 5),
+      makeUnit('player', 'dark_magician',          0, 2),
+      makeUnit('player', 'gaia_fierce_knight',     1, 4),
+      makeUnit('player', 'giant_soldier_of_stone', 0, 6),
+      makeUnit('enemy', 'giant_soldier_of_stone', 7, 1),
+      makeUnit('enemy', 'gaia_fierce_knight',     6, 3),
+      makeUnit('enemy', 'dark_magician',          7, 5),
     ];
   }
 
@@ -351,7 +347,7 @@
   }
 
   function labelOf(u) {
-    return (u.team === 'player' ? 'Your' : 'Enemy') + ' ' + UNIT_TYPES[u.type].name;
+    return (u.team === 'player' ? 'Your' : 'Enemy') + ' ' + u.name;
   }
 
   // ---------- Combat ----------
@@ -575,12 +571,12 @@
   // ---------- Rendering ----------
 
   function drawUnitShape(u, cx, cy, size) {
-    const color = TEAM_COLORS[u.team][u.type];
+    const color = TEAM_COLORS[u.team][u.unitId];
     ctx.fillStyle = color;
     ctx.strokeStyle = '#0a0a12';
     ctx.lineWidth = 2;
 
-    if (u.type === 'soldier') {
+    if (u.unitId === 'gaia_fierce_knight') {
       ctx.beginPath();
       ctx.moveTo(cx, cy - size);
       ctx.lineTo(cx + size, cy);
@@ -588,7 +584,7 @@
       ctx.lineTo(cx - size, cy);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
-    } else if (u.type === 'archer') {
+    } else if (u.unitId === 'dark_magician') {
       ctx.beginPath();
       ctx.moveTo(cx, cy - size);
       ctx.lineTo(cx + size, cy + size * 0.8);
@@ -665,8 +661,11 @@
 
   function statsHtml(u) {
     return (
-      '<div style="color:' + TEAM_COLORS[u.team][u.type] + '; font-weight:bold; margin-bottom:4px;">' +
+      '<div style="color:' + TEAM_COLORS[u.team][u.unitId] + '; font-weight:bold; margin-bottom:4px;">' +
       labelOf(u) + (u.turnDone ? ' (done)' : '') + '</div>' +
+      '<div class="stat-row"><span>TYPE</span><span>' + u.monsterType + '</span></div>' +
+      '<div class="stat-row"><span>ATTRIBUTE</span><span>' + u.attribute + '</span></div>' +
+      '<div class="stat-row"><span>COST</span><span>' + u.cost + '</span></div>' +
       '<div class="stat-row"><span>HP</span><span>' + u.hp + ' / ' + u.maxHp + '</span></div>' +
       '<div class="stat-row"><span>ATK</span><span>' + u.atk + '</span></div>' +
       '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
