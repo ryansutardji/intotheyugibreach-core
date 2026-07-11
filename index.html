@@ -134,6 +134,22 @@
     font-size: 11px;
   }
 
+  .unit-info-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .unit-info-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border: 1px solid #44445a;
+    flex-shrink: 0;
+    background: #1a1a2e;
+  }
+
   .unit-effect {
     margin-top: 6px;
     padding-top: 6px;
@@ -192,7 +208,7 @@
   }
 
   .legend-row { display: flex; align-items: center; gap: 8px; }
-  .swatch { width: 12px; height: 12px; flex-shrink: 0; border: 1px solid #000; }
+  .swatch { width: 18px; height: 18px; flex-shrink: 0; border: 1px solid #000; object-fit: cover; border-radius: 50%; background: #1a1a2e; }
   .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
 
   #draft-screen {
@@ -232,6 +248,25 @@
   .unit-card:hover:not(.disabled) { border-color: #8bac0f; }
   .unit-card.selected { border-color: #facc15; background: #33331f; }
   .unit-card.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .unit-card-inner {
+    display: flex;
+    gap: 8px;
+  }
+
+  .unit-card-thumb {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border: 1px solid #44445a;
+    flex-shrink: 0;
+    background: #1a1a2e;
+  }
+
+  .unit-card-body {
+    flex: 1;
+    min-width: 0;
+  }
 
   .unit-card-header {
     display: flex;
@@ -365,7 +400,7 @@
     <div class="panel legend">
       <h3 style="margin-bottom:6px;">LEGEND</h3>
       <div id="legend-rows"></div>
-      <div class="legend-note">Shape = unit type, color = unit, outline = team (blue outline = you, red outline = enemy).</div>
+      <div class="legend-note">Outline = team (blue outline = you, red outline = enemy).</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
     </div>
   </div>
@@ -401,6 +436,18 @@
   };
 
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
+
+  function spritePath(unitId) {
+    return 'assets/sprites/' + unitId + '.jpg';
+  }
+
+  const spriteImages = {};
+  Object.keys(UNIT_DATABASE).forEach(id => {
+    const img = new Image();
+    img.onload = () => render();
+    img.src = spritePath(id);
+    spriteImages[id] = img;
+  });
 
   const canvas = document.getElementById('board');
   const ctx = canvas.getContext('2d');
@@ -517,7 +564,7 @@
     legendRowsEl.innerHTML = ids.map(id => {
       const t = UNIT_DATABASE[id];
       return (
-        '<div class="legend-row"><div class="swatch" style="background:' + UNIT_COLORS[id] + '"></div> ' +
+        '<div class="legend-row"><img class="swatch" src="' + spritePath(id) + '" alt=""> ' +
         t.name + ' — ' + t.type + ', range ' + t.range + '</div>'
       );
     }).join('');
@@ -898,86 +945,28 @@
 
   // ---------- Rendering ----------
 
-  function drawUnitShape(u, cx, cy, size) {
-    ctx.fillStyle = UNIT_COLORS[u.unitId] || '#999999';
+  function drawUnitSprite(u, cx, cy, size) {
+    const img = spriteImages[u.unitId];
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    if (img && img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, cx - size, cy - size, size * 2, size * 2);
+    } else {
+      ctx.fillStyle = UNIT_COLORS[u.unitId] || '#999999';
+      ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
+    }
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    ctx.closePath();
     ctx.strokeStyle = TEAM_STROKE[u.team];
     ctx.lineWidth = 3;
-
-    switch (u.monsterType) {
-      case 'Warrior':
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - size);
-        ctx.lineTo(cx + size, cy);
-        ctx.lineTo(cx, cy + size);
-        ctx.lineTo(cx - size, cy);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Spellcaster':
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - size);
-        ctx.lineTo(cx + size, cy + size * 0.8);
-        ctx.lineTo(cx - size, cy + size * 0.8);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Fiend':
-        ctx.beginPath();
-        ctx.arc(cx, cy, size, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Dragon':
-        ctx.beginPath();
-        ctx.moveTo(cx + size, cy);
-        ctx.lineTo(cx - size * 0.6, cy - size);
-        ctx.lineTo(cx - size * 0.2, cy);
-        ctx.lineTo(cx - size * 0.6, cy + size);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Insect':
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const angle = (Math.PI / 3) * i - Math.PI / 2;
-          const px = cx + size * Math.cos(angle);
-          const py = cy + size * Math.sin(angle);
-          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Beast':
-        ctx.beginPath();
-        ctx.moveTo(cx - size, cy - size * 0.8);
-        ctx.lineTo(cx + size, cy - size * 0.8);
-        ctx.lineTo(cx, cy + size);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Sea Serpent':
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, size * 1.1, size * 0.7, 0, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Beast-Warrior':
-        ctx.beginPath();
-        for (let i = 0; i < 5; i++) {
-          const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
-          const px = cx + size * Math.cos(angle);
-          const py = cy + size * Math.sin(angle);
-          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill(); ctx.stroke();
-        break;
-      case 'Rock':
-      default:
-        ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
-        ctx.strokeRect(cx - size, cy - size, size * 2, size * 2);
-        break;
-    }
+    ctx.stroke();
   }
 
   function draw() {
@@ -1030,7 +1019,7 @@
         ctx.strokeRect(u.x * TILE + 3, u.y * TILE + 3, TILE - 6, TILE - 6);
       }
 
-      drawUnitShape(u, cx, cy, 18);
+      drawUnitSprite(u, cx, cy, 22);
 
       const barW = 40, barH = 6;
       const barX = cx - barW / 2, barY = u.y * TILE + 6;
@@ -1051,8 +1040,12 @@
 
   function statsHtml(u) {
     return (
-      '<div style="color:' + UNIT_COLORS[u.unitId] + '; font-weight:bold; margin-bottom:4px;">' +
-      labelOf(u) + (u.turnDone ? ' (done)' : '') + '</div>' +
+      '<div class="unit-info-header">' +
+        '<img class="unit-info-thumb" src="' + spritePath(u.unitId) + '" alt="">' +
+        '<div style="color:' + UNIT_COLORS[u.unitId] + '; font-weight:bold;">' +
+          labelOf(u) + (u.turnDone ? ' (done)' : '') +
+        '</div>' +
+      '</div>' +
       '<div class="stat-row"><span>TYPE</span><span>' + u.monsterType + '</span></div>' +
       '<div class="stat-row"><span>ATTRIBUTE</span><span>' + u.attribute + '</span></div>' +
       '<div class="stat-row"><span>COST</span><span>' + u.cost + '</span></div>' +
@@ -1186,12 +1179,17 @@
       if (!affordable) classes.push('disabled');
       return (
         '<div class="' + classes.join(' ') + '" data-unit-id="' + id + '">' +
-          '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
-          '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
-          '<div class="unit-card-stats">' +
-            '<span>HP ' + u.hp + '</span><span>ATK ' + u.atk + '</span><span>MOV ' + u.move + '</span><span>RNG ' + u.range + '</span>' +
+          '<div class="unit-card-inner">' +
+            '<img class="unit-card-thumb" src="' + spritePath(id) + '" alt="">' +
+            '<div class="unit-card-body">' +
+              '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
+              '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+              '<div class="unit-card-stats">' +
+                '<span>HP ' + u.hp + '</span><span>ATK ' + u.atk + '</span><span>MOV ' + u.move + '</span><span>RNG ' + u.range + '</span>' +
+              '</div>' +
+              '<div class="unit-card-effect">' + u.effect + '</div>' +
+            '</div>' +
           '</div>' +
-          '<div class="unit-card-effect">' + u.effect + '</div>' +
         '</div>'
       );
     }).join('');
@@ -1319,9 +1317,14 @@
       const isSelected = id === selectedPlacementUnitId;
       return (
         '<div class="unit-card' + (isSelected ? ' selected' : '') + '" data-unit-id="' + id + '">' +
-          '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
-          '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
-          '<div class="unit-card-effect">' + u.effect + '</div>' +
+          '<div class="unit-card-inner">' +
+            '<img class="unit-card-thumb" src="' + spritePath(id) + '" alt="">' +
+            '<div class="unit-card-body">' +
+              '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
+              '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+              '<div class="unit-card-effect">' + u.effect + '</div>' +
+            '</div>' +
+          '</div>' +
         '</div>'
       );
     }).join('') || '<div class="empty-hint">All units deployed.</div>';
