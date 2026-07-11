@@ -69,9 +69,9 @@ const UNIT_DATABASE = {
   },
   gaia_fierce_knight: {
     name: 'Gaia the Fierce Knight',
-    cost: 4,
-    hp: 60,
-    atk: 22,
+    cost: 7,
+    hp: 100,
+    atk: 24,
     move: 3,
     range: 1,
     type: 'Warrior',

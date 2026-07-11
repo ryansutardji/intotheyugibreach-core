@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Tactics Skirmish</title>
+<title>Into the Yugibreach</title>
 <style>
   * { box-sizing: border-box; }
 
@@ -185,11 +185,120 @@
   .legend-row { display: flex; align-items: center; gap: 8px; }
   .swatch { width: 12px; height: 12px; flex-shrink: 0; border: 1px solid #000; }
   .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
+
+  #draft-screen {
+    width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #1a1a2e;
+    padding: 16px;
+    border: 4px solid #44445a;
+    box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
+  }
+
+  #draft-screen.hidden,
+  .game-container.hidden { display: none; }
+
+  #budget-meter {
+    text-align: center;
+    font-size: 14px;
+    letter-spacing: 2px;
+    color: #9bbc0f;
+  }
+
+  .unit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .unit-card {
+    background: #2d2d44;
+    border: 2px solid #44445a;
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+
+  .unit-card:hover:not(.disabled) { border-color: #8bac0f; }
+  .unit-card.selected { border-color: #facc15; background: #33331f; }
+  .unit-card.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .unit-card-header {
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    font-size: 12px;
+    color: #c9d6a3;
+  }
+
+  .unit-card-cost {
+    color: #f0e68c;
+    background: #1a1a2e;
+    border: 1px solid #44445a;
+    padding: 0 6px;
+  }
+
+  .unit-card-sub {
+    font-size: 10px;
+    color: #8bac0f;
+    margin: 4px 0;
+  }
+
+  .unit-card-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 10px;
+    color: #666a80;
+  }
+
+  .roster-label {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: #8bac0f;
+    margin: 10px 0 6px;
+  }
+
+  .roster-label:first-child { margin-top: 0; }
+
+  .roster-total {
+    border-top: 1px solid #44445a;
+    padding-top: 4px;
+    margin-top: 4px;
+    color: #f0e68c;
+  }
 </style>
 </head>
 <body>
 
-<div class="game-container">
+<div id="draft-screen">
+  <h1 class="title">DRAFT YOUR TEAM</h1>
+
+  <div class="panel">
+    <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
+  </div>
+
+  <div class="panel" id="picker-panel">
+    <h3>AVAILABLE UNITS — CLICK TO DRAFT</h3>
+    <div class="unit-grid" id="unit-grid"></div>
+  </div>
+
+  <div class="btn-row">
+    <button id="confirm-team-btn" class="primary" disabled>CONFIRM TEAM</button>
+  </div>
+
+  <div class="panel" id="results-panel" style="display:none;">
+    <h3>DRAFT RESULTS</h3>
+    <div id="results-content"></div>
+    <div class="btn-row" style="margin-top:10px;">
+      <button id="redraft-btn">REDRAFT</button>
+      <button id="start-battle-btn" class="primary" disabled title="Placement system coming soon">START BATTLE (SOON)</button>
+    </div>
+  </div>
+</div>
+
+<div class="game-container hidden">
   <div class="board-wrap">
     <canvas id="board" width="512" height="512"></canvas>
     <div id="overlay-banner">
@@ -740,6 +849,108 @@
     log('Battle begins! Eliminate all enemy units to win.');
     render();
   }
+
+  // ---------- Draft ----------
+
+  const DRAFT_BUDGET = 10;
+  let selectedPlayerUnits = [];
+
+  const unitGridEl = document.getElementById('unit-grid');
+  const budgetRemainingEl = document.getElementById('budget-remaining');
+  const confirmTeamBtn = document.getElementById('confirm-team-btn');
+  const pickerPanelEl = document.getElementById('picker-panel');
+  const resultsPanelEl = document.getElementById('results-panel');
+  const resultsContentEl = document.getElementById('results-content');
+  const redraftBtn = document.getElementById('redraft-btn');
+
+  function playerSpent() {
+    return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
+  }
+
+  function draftAITeam(budget) {
+    const team = [];
+    let remaining = budget;
+    while (true) {
+      const pool = Object.keys(UNIT_DATABASE)
+        .filter(id => !team.includes(id) && UNIT_DATABASE[id].cost <= remaining);
+      if (pool.length === 0) break;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      team.push(pick);
+      remaining -= UNIT_DATABASE[pick].cost;
+    }
+    return team;
+  }
+
+  function renderUnitGrid() {
+    const remaining = DRAFT_BUDGET - playerSpent();
+    budgetRemainingEl.textContent = remaining;
+
+    unitGridEl.innerHTML = Object.keys(UNIT_DATABASE).map(id => {
+      const u = UNIT_DATABASE[id];
+      const isSelected = selectedPlayerUnits.includes(id);
+      const affordable = isSelected || u.cost <= remaining;
+      const classes = ['unit-card'];
+      if (isSelected) classes.push('selected');
+      if (!affordable) classes.push('disabled');
+      return (
+        '<div class="' + classes.join(' ') + '" data-unit-id="' + id + '">' +
+          '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
+          '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+          '<div class="unit-card-stats">' +
+            '<span>HP ' + u.hp + '</span><span>ATK ' + u.atk + '</span><span>MOV ' + u.move + '</span><span>RNG ' + u.range + '</span>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    confirmTeamBtn.disabled = selectedPlayerUnits.length === 0;
+  }
+
+  unitGridEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card) return;
+    const id = card.dataset.unitId;
+    if (selectedPlayerUnits.includes(id)) {
+      selectedPlayerUnits = selectedPlayerUnits.filter(u => u !== id);
+    } else {
+      const remaining = DRAFT_BUDGET - playerSpent();
+      if (UNIT_DATABASE[id].cost > remaining) return;
+      selectedPlayerUnits.push(id);
+    }
+    renderUnitGrid();
+  });
+
+  function rosterHtml(label, teamIds) {
+    const total = teamIds.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
+    const rows = teamIds.map(id => {
+      const u = UNIT_DATABASE[id];
+      return '<div class="stat-row"><span>' + u.name + '</span><span>' + u.cost + '</span></div>';
+    }).join('');
+    return (
+      '<div class="roster-label">' + label + '</div>' +
+      rows +
+      '<div class="stat-row roster-total"><span>TOTAL</span><span>' + total + ' / ' + DRAFT_BUDGET + '</span></div>'
+    );
+  }
+
+  confirmTeamBtn.addEventListener('click', () => {
+    const aiTeam = draftAITeam(DRAFT_BUDGET);
+    resultsContentEl.innerHTML =
+      rosterHtml('YOUR TEAM', selectedPlayerUnits) +
+      rosterHtml('ENEMY TEAM', aiTeam);
+    pickerPanelEl.style.display = 'none';
+    confirmTeamBtn.style.display = 'none';
+    resultsPanelEl.style.display = 'block';
+  });
+
+  redraftBtn.addEventListener('click', () => {
+    pickerPanelEl.style.display = 'block';
+    confirmTeamBtn.style.display = 'block';
+    resultsPanelEl.style.display = 'none';
+    renderUnitGrid();
+  });
+
+  renderUnitGrid();
 
   // ---------- Init ----------
   initUnits();
