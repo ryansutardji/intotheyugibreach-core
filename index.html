@@ -125,7 +125,7 @@
 
   #unit-info {
     font-size: 12px;
-    min-height: 96px;
+    min-height: 170px;
     line-height: 1.6;
   }
 
@@ -262,6 +262,9 @@
 
   .roster-label:first-child { margin-top: 0; }
 
+  #placement-roster .unit-card { margin-bottom: 6px; }
+  #placement-roster .unit-card:last-child { margin-bottom: 0; }
+
   .roster-total {
     border-top: 1px solid #44445a;
     padding-top: 4px;
@@ -293,7 +296,7 @@
     <div id="results-content"></div>
     <div class="btn-row" style="margin-top:10px;">
       <button id="redraft-btn">REDRAFT</button>
-      <button id="start-battle-btn" class="primary" disabled title="Placement system coming soon">START BATTLE (SOON)</button>
+      <button id="start-battle-btn" class="primary">DEPLOY TROOPS</button>
     </div>
   </div>
 </div>
@@ -311,7 +314,7 @@
   <div class="sidebar">
     <h1 class="title">TACTICS SKIRMISH</h1>
 
-    <div class="panel">
+    <div class="panel" id="turn-panel">
       <div id="turn-indicator" class="player">PLAYER TURN</div>
       <div id="round-counter">ROUND 1</div>
     </div>
@@ -321,24 +324,30 @@
       <div id="unit-info"><div class="empty-hint">Click one of your units to select it.</div></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="placement-panel" style="display:none;">
+      <h3>DEPLOY YOUR UNITS</h3>
+      <div id="placement-roster"></div>
+      <div class="legend-note">Click a unit above, then click a highlighted tile on your side of the board. Click a placed unit to pick it back up.</div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button id="auto-place-btn">AUTO-PLACE</button>
+        <button id="begin-battle-btn" class="primary" disabled>BEGIN BATTLE</button>
+      </div>
+    </div>
+
+    <div class="panel" id="battle-log-panel">
       <h3>BATTLE LOG</h3>
       <div id="battle-log"></div>
     </div>
 
-    <div class="btn-row">
+    <div class="btn-row" id="battle-btn-row">
       <button id="end-turn-btn" class="primary">END TURN</button>
       <button id="restart-btn">RESTART</button>
     </div>
 
     <div class="panel legend">
       <h3 style="margin-bottom:6px;">LEGEND</h3>
-      <div class="legend-row"><div class="swatch" style="background:#3b82f6"></div> Your Gaia the Fierce Knight — balanced, mid range</div>
-      <div class="legend-row"><div class="swatch" style="background:#22d3ee"></div> Your Dark Magician — frail, long range</div>
-      <div class="legend-row"><div class="swatch" style="background:#1e3a8a"></div> Your Giant Soldier of Stone — tough, slow, short range</div>
-      <div class="legend-row"><div class="swatch" style="background:#ef4444"></div> Enemy Gaia the Fierce Knight</div>
-      <div class="legend-row"><div class="swatch" style="background:#f97316"></div> Enemy Dark Magician</div>
-      <div class="legend-row"><div class="swatch" style="background:#7f1d1d"></div> Enemy Giant Soldier of Stone</div>
+      <div id="legend-rows"></div>
+      <div class="legend-note">Shape = unit type, color = unit, outline = team (blue outline = you, red outline = enemy).</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
     </div>
   </div>
@@ -352,10 +361,18 @@
   const GRID = 8;
   const TILE = 64;
 
-  const TEAM_COLORS = {
-    player: { gaia_fierce_knight: '#3b82f6', dark_magician: '#22d3ee', giant_soldier_of_stone: '#1e3a8a' },
-    enemy:  { gaia_fierce_knight: '#ef4444', dark_magician: '#f97316', giant_soldier_of_stone: '#7f1d1d' },
+  const UNIT_COLORS = {
+    kuriboh: '#a855f7',
+    giant_soldier_of_stone: '#78716c',
+    baby_dragon: '#f97316',
+    celtic_guardian: '#22c55e',
+    mystical_elf: '#38bdf8',
+    gemini_elf: '#eab308',
+    gaia_fierce_knight: '#3b82f6',
+    dark_magician: '#22d3ee',
   };
+
+  const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
 
   const canvas = document.getElementById('board');
   const ctx = canvas.getContext('2d');
@@ -369,7 +386,19 @@
   const bannerTextEl = document.getElementById('banner-text');
   const bannerSubEl = document.getElementById('banner-sub');
   const bannerRestartBtn = document.getElementById('banner-restart');
+  const legendRowsEl = document.getElementById('legend-rows');
+  const draftScreenEl = document.getElementById('draft-screen');
+  const gameContainerEl = document.querySelector('.game-container');
+  const turnPanelEl = document.getElementById('turn-panel');
+  const battleLogPanelEl = document.getElementById('battle-log-panel');
+  const battleBtnRowEl = document.getElementById('battle-btn-row');
+  const placementPanelEl = document.getElementById('placement-panel');
+  const placementRosterEl = document.getElementById('placement-roster');
+  const startBattleBtn = document.getElementById('start-battle-btn');
+  const autoPlaceBtn = document.getElementById('auto-place-btn');
+  const beginBattleBtn = document.getElementById('begin-battle-btn');
 
+  let phase = 'draft'; // 'draft' | 'placement' | 'battle'
   let units = [];
   let nextId = 1;
   let currentTurn = 'player'; // 'player' | 'enemy'
@@ -390,17 +419,6 @@
       hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
       alive: true, hasMoved: false, turnDone: false,
     };
-  }
-
-  function initUnits() {
-    units = [
-      makeUnit('player', 'dark_magician',          0, 2),
-      makeUnit('player', 'gaia_fierce_knight',     1, 4),
-      makeUnit('player', 'giant_soldier_of_stone', 0, 6),
-      makeUnit('enemy', 'giant_soldier_of_stone', 7, 1),
-      makeUnit('enemy', 'gaia_fierce_knight',     6, 3),
-      makeUnit('enemy', 'dark_magician',          7, 5),
-    ];
   }
 
   function manhattan(x1, y1, x2, y2) {
@@ -457,6 +475,17 @@
 
   function labelOf(u) {
     return (u.team === 'player' ? 'Your' : 'Enemy') + ' ' + u.name;
+  }
+
+  function renderLegend() {
+    const ids = Array.from(new Set([...selectedPlayerUnits, ...confirmedAiTeam]));
+    legendRowsEl.innerHTML = ids.map(id => {
+      const t = UNIT_DATABASE[id];
+      return (
+        '<div class="legend-row"><div class="swatch" style="background:' + UNIT_COLORS[id] + '"></div> ' +
+        t.name + ' — ' + t.type + ', range ' + t.range + '</div>'
+      );
+    }).join('');
   }
 
   // ---------- Combat ----------
@@ -680,29 +709,48 @@
   // ---------- Rendering ----------
 
   function drawUnitShape(u, cx, cy, size) {
-    const color = TEAM_COLORS[u.team][u.unitId];
-    ctx.fillStyle = color;
-    ctx.strokeStyle = '#0a0a12';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = UNIT_COLORS[u.unitId] || '#999999';
+    ctx.strokeStyle = TEAM_STROKE[u.team];
+    ctx.lineWidth = 3;
 
-    if (u.unitId === 'gaia_fierce_knight') {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - size);
-      ctx.lineTo(cx + size, cy);
-      ctx.lineTo(cx, cy + size);
-      ctx.lineTo(cx - size, cy);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-    } else if (u.unitId === 'dark_magician') {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - size);
-      ctx.lineTo(cx + size, cy + size * 0.8);
-      ctx.lineTo(cx - size, cy + size * 0.8);
-      ctx.closePath();
-      ctx.fill(); ctx.stroke();
-    } else {
-      ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
-      ctx.strokeRect(cx - size, cy - size, size * 2, size * 2);
+    switch (u.monsterType) {
+      case 'Warrior':
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - size);
+        ctx.lineTo(cx + size, cy);
+        ctx.lineTo(cx, cy + size);
+        ctx.lineTo(cx - size, cy);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Spellcaster':
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - size);
+        ctx.lineTo(cx + size, cy + size * 0.8);
+        ctx.lineTo(cx - size, cy + size * 0.8);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Fiend':
+        ctx.beginPath();
+        ctx.arc(cx, cy, size, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Dragon':
+        ctx.beginPath();
+        ctx.moveTo(cx + size, cy);
+        ctx.lineTo(cx - size * 0.6, cy - size);
+        ctx.lineTo(cx - size * 0.2, cy);
+        ctx.lineTo(cx - size * 0.6, cy + size);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Rock':
+      default:
+        ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
+        ctx.strokeRect(cx - size, cy - size, size * 2, size * 2);
+        break;
     }
   }
 
@@ -714,6 +762,13 @@
         ctx.fillStyle = (x + y) % 2 === 0 ? '#2d2d44' : '#26263a';
         ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
       }
+    }
+
+    if (phase === 'placement') {
+      ctx.fillStyle = 'rgba(74, 158, 255, 0.18)';
+      [0, 1].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
+      [6, 7].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
     }
 
     if (selectedUnit && !gameOver) {
@@ -770,7 +825,7 @@
 
   function statsHtml(u) {
     return (
-      '<div style="color:' + TEAM_COLORS[u.team][u.unitId] + '; font-weight:bold; margin-bottom:4px;">' +
+      '<div style="color:' + UNIT_COLORS[u.unitId] + '; font-weight:bold; margin-bottom:4px;">' +
       labelOf(u) + (u.turnDone ? ' (done)' : '') + '</div>' +
       '<div class="stat-row"><span>TYPE</span><span>' + u.monsterType + '</span></div>' +
       '<div class="stat-row"><span>ATTRIBUTE</span><span>' + u.attribute + '</span></div>' +
@@ -802,7 +857,8 @@
     const tx = Math.floor(px / TILE);
     const ty = Math.floor(py / TILE);
     if (tx < 0 || tx >= GRID || ty < 0 || ty >= GRID) return;
-    handleBoardClick(tx, ty);
+    if (phase === 'placement') handlePlacementBoardClick(tx, ty);
+    else if (phase === 'battle') handleBoardClick(tx, ty);
   });
 
   canvas.addEventListener('mousemove', (e) => {
@@ -826,10 +882,12 @@
   });
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
-  restartBtn.addEventListener('click', restartGame);
-  bannerRestartBtn.addEventListener('click', restartGame);
+  restartBtn.addEventListener('click', resetToDraftScreen);
+  bannerRestartBtn.addEventListener('click', resetToDraftScreen);
 
-  function restartGame() {
+  function resetToDraftScreen() {
+    phase = 'draft';
+    units = [];
     nextId = 1;
     currentTurn = 'player';
     round = 1;
@@ -842,18 +900,25 @@
     battleLogEl.innerHTML = '';
     bannerEl.classList.remove('show', 'victory', 'defeat');
     endTurnBtn.disabled = false;
-    initUnits();
-    turnIndicatorEl.textContent = 'PLAYER TURN';
-    turnIndicatorEl.className = 'player';
-    roundCounterEl.textContent = 'ROUND ' + round;
-    log('Battle begins! Eliminate all enemy units to win.');
-    render();
+
+    selectedPlayerUnits = [];
+    confirmedAiTeam = [];
+    pendingPlayerUnits = [];
+    selectedPlacementUnitId = null;
+
+    gameContainerEl.classList.add('hidden');
+    draftScreenEl.classList.remove('hidden');
+    pickerPanelEl.style.display = 'block';
+    confirmTeamBtn.style.display = 'block';
+    resultsPanelEl.style.display = 'none';
+    renderUnitGrid();
   }
 
   // ---------- Draft ----------
 
   const DRAFT_BUDGET = 10;
   let selectedPlayerUnits = [];
+  let confirmedAiTeam = [];
 
   const unitGridEl = document.getElementById('unit-grid');
   const budgetRemainingEl = document.getElementById('budget-remaining');
@@ -934,14 +999,16 @@
   }
 
   confirmTeamBtn.addEventListener('click', () => {
-    const aiTeam = draftAITeam(DRAFT_BUDGET);
+    confirmedAiTeam = draftAITeam(DRAFT_BUDGET);
     resultsContentEl.innerHTML =
       rosterHtml('YOUR TEAM', selectedPlayerUnits) +
-      rosterHtml('ENEMY TEAM', aiTeam);
+      rosterHtml('ENEMY TEAM', confirmedAiTeam);
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
     resultsPanelEl.style.display = 'block';
   });
+
+  startBattleBtn.addEventListener('click', enterPlacementPhase);
 
   redraftBtn.addEventListener('click', () => {
     pickerPanelEl.style.display = 'block';
@@ -952,10 +1019,156 @@
 
   renderUnitGrid();
 
-  // ---------- Init ----------
-  initUnits();
-  log('Battle begins! Eliminate all enemy units to win.');
-  render();
+  // ---------- Placement ----------
+
+  const PLAYER_ZONE_X = [0, 1];
+  const AI_FRONT_X = 6;
+  const AI_BACK_X = 7;
+  const SPREAD_ROWS = [3, 4, 2, 5, 1, 6, 0, 7];
+
+  let pendingPlayerUnits = [];
+  let selectedPlacementUnitId = null;
+
+  function placeAITeam(aiTeamIds) {
+    const front = aiTeamIds.filter(id => UNIT_DATABASE[id].range === 1);
+    const back = aiTeamIds.filter(id => UNIT_DATABASE[id].range >= 2);
+
+    function assign(ids, x) {
+      const rows = SPREAD_ROWS.slice(0, ids.length);
+      ids.forEach((id, i) => units.push(makeUnit('enemy', id, x, rows[i])));
+    }
+
+    function freeRows(x) {
+      const used = new Set(units.filter(u => u.x === x).map(u => u.y));
+      const rows = [];
+      for (let y = 0; y < GRID; y++) if (!used.has(y)) rows.push(y);
+      return rows;
+    }
+
+    assign(front.slice(0, GRID), AI_FRONT_X);
+    assign(back.slice(0, GRID), AI_BACK_X);
+
+    // Overflow (>8 units wanting one column) spills into the other column's free rows.
+    front.slice(GRID).forEach(id => {
+      const rows = freeRows(AI_BACK_X);
+      units.push(makeUnit('enemy', id, AI_BACK_X, rows.length ? rows[0] : 0));
+    });
+    back.slice(GRID).forEach(id => {
+      const rows = freeRows(AI_FRONT_X);
+      units.push(makeUnit('enemy', id, AI_FRONT_X, rows.length ? rows[0] : 0));
+    });
+  }
+
+  function enterPlacementPhase() {
+    phase = 'placement';
+    units = [];
+    nextId = 1;
+    pendingPlayerUnits = [...selectedPlayerUnits];
+    selectedPlacementUnitId = null;
+    selectedUnit = null;
+    reachableTiles = [];
+    attackableTargets = [];
+    hoveredTile = null;
+
+    placeAITeam(confirmedAiTeam);
+    renderLegend();
+
+    draftScreenEl.classList.add('hidden');
+    gameContainerEl.classList.remove('hidden');
+
+    turnPanelEl.style.display = 'none';
+    battleLogPanelEl.style.display = 'none';
+    battleBtnRowEl.style.display = 'none';
+    placementPanelEl.style.display = 'block';
+
+    renderPlacementRoster();
+    render();
+  }
+
+  function renderPlacementRoster() {
+    placementRosterEl.innerHTML = pendingPlayerUnits.map(id => {
+      const u = UNIT_DATABASE[id];
+      const isSelected = id === selectedPlacementUnitId;
+      return (
+        '<div class="unit-card' + (isSelected ? ' selected' : '') + '" data-unit-id="' + id + '">' +
+          '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
+          '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+        '</div>'
+      );
+    }).join('') || '<div class="empty-hint">All units deployed.</div>';
+    beginBattleBtn.disabled = pendingPlayerUnits.length > 0;
+  }
+
+  placementRosterEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card) return;
+    const id = card.dataset.unitId;
+    selectedPlacementUnitId = (selectedPlacementUnitId === id) ? null : id;
+    renderPlacementRoster();
+  });
+
+  function handlePlacementBoardClick(tx, ty) {
+    const occupant = unitAt(tx, ty);
+
+    if (occupant && occupant.team === 'player') {
+      units = units.filter(u => u !== occupant);
+      pendingPlayerUnits.push(occupant.unitId);
+      selectedPlacementUnitId = null;
+      renderPlacementRoster();
+      render();
+      return;
+    }
+
+    if (!occupant && selectedPlacementUnitId && PLAYER_ZONE_X.includes(tx)) {
+      units.push(makeUnit('player', selectedPlacementUnitId, tx, ty));
+      pendingPlayerUnits = pendingPlayerUnits.filter(id => id !== selectedPlacementUnitId);
+      selectedPlacementUnitId = null;
+      renderPlacementRoster();
+      render();
+    }
+  }
+
+  function autoPlacePlayer() {
+    pendingPlayerUnits.slice().forEach(id => {
+      const empty = [];
+      for (const x of PLAYER_ZONE_X) {
+        for (let y = 0; y < GRID; y++) {
+          if (!unitAt(x, y)) empty.push({ x, y });
+        }
+      }
+      if (empty.length === 0) return;
+      const tile = empty[Math.floor(Math.random() * empty.length)];
+      units.push(makeUnit('player', id, tile.x, tile.y));
+      pendingPlayerUnits = pendingPlayerUnits.filter(pid => pid !== id);
+    });
+    selectedPlacementUnitId = null;
+    renderPlacementRoster();
+    render();
+  }
+
+  autoPlaceBtn.addEventListener('click', autoPlacePlayer);
+
+  function beginBattle() {
+    phase = 'battle';
+    placementPanelEl.style.display = 'none';
+    turnPanelEl.style.display = 'block';
+    battleLogPanelEl.style.display = 'block';
+    battleBtnRowEl.style.display = 'flex';
+
+    round = 1;
+    currentTurn = 'player';
+    gameOver = false;
+    endTurnBtn.disabled = false;
+    turnIndicatorEl.textContent = 'PLAYER TURN';
+    turnIndicatorEl.className = 'player';
+    roundCounterEl.textContent = 'ROUND ' + round;
+
+    battleLogEl.innerHTML = '';
+    log('Battle begins! Eliminate all enemy units to win.');
+    render();
+  }
+
+  beginBattleBtn.addEventListener('click', beginBattle);
 })();
 </script>
 </body>
