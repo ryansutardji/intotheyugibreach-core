@@ -125,13 +125,22 @@
 
   #unit-info {
     font-size: 12px;
-    min-height: 170px;
+    min-height: 216px;
     line-height: 1.6;
   }
 
   #unit-info .empty-hint {
     color: #666a80;
     font-size: 11px;
+  }
+
+  .unit-effect {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dotted #44445a;
+    font-size: 10px;
+    color: #8bac0f;
+    line-height: 1.4;
   }
 
   .stat-row {
@@ -253,6 +262,15 @@
     color: #666a80;
   }
 
+  .unit-card-effect {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dotted #44445a;
+    font-size: 10px;
+    color: #666a80;
+    line-height: 1.4;
+  }
+
   .roster-label {
     font-size: 11px;
     letter-spacing: 1px;
@@ -370,6 +388,16 @@
     gemini_elf: '#eab308',
     gaia_fierce_knight: '#3b82f6',
     dark_magician: '#22d3ee',
+    man_eater_bug: '#84cc16',
+    silver_fang: '#94a3b8',
+    kaiser_sea_horse: '#14b8a6',
+    beaver_warrior: '#92400e',
+    feral_imp: '#dc2626',
+    flame_swordsman: '#f43f5e',
+    curse_of_dragon: '#6366f1',
+    summoned_skull: '#991b1b',
+    dark_magician_girl: '#ec4899',
+    blue_eyes_white_dragon: '#e5e7eb',
   };
 
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
@@ -411,6 +439,9 @@
   let attackableTargets = [];
   let hoveredTile = null;
 
+  let playerDeaths = 0;
+  let enemyDeaths = 0;
+
   function makeUnit(team, unitId, x, y) {
     const t = UNIT_DATABASE[unitId];
     return {
@@ -418,6 +449,7 @@
       name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
       hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
       alive: true, hasMoved: false, turnDone: false,
+      movedThisTurn: false, attacksUsed: 0, usedSacrifice: false,
     };
   }
 
@@ -437,6 +469,7 @@
 
   function bfsReachable(unit) {
     const occupied = occupiedSet(unit);
+    const canPassThrough = unit.unitId === 'curse_of_dragon';
     const start = { x: unit.x, y: unit.y };
     const visited = new Map([[start.x + ',' + start.y, 0]]);
     const queue = [start];
@@ -452,10 +485,12 @@
       for (const n of neighbors) {
         if (n.x < 0 || n.x >= GRID || n.y < 0 || n.y >= GRID) continue;
         const key = n.x + ',' + n.y;
-        if (visited.has(key) || occupied.has(key)) continue;
+        if (visited.has(key)) continue;
+        const isOccupied = occupied.has(key);
+        if (isOccupied && !canPassThrough) continue;
         visited.set(key, dist + 1);
         queue.push(n);
-        result.push(n);
+        if (!isOccupied) result.push(n);
       }
     }
     return result;
@@ -488,17 +523,135 @@
     }).join('');
   }
 
+  // ---------- Effects ----------
+
+  function alliesAdjacentTo(unit) {
+    return units.filter(u => u.alive && u !== unit && u.team === unit.team && manhattan(u.x, u.y, unit.x, unit.y) === 1);
+  }
+
+  function attacksPerTurn(unit) {
+    return unit.unitId === 'gemini_elf' ? 2 : 1;
+  }
+
+  function outgoingDamageBonusFlat(attacker) {
+    let bonus = 0;
+
+    if (attacker.unitId === 'silver_fang') {
+      bonus += 4 * alliesAdjacentTo(attacker).filter(a => a.monsterType === 'Beast').length;
+    }
+
+    if (attacker.unitId === 'kaiser_sea_horse' || attacker.unitId === 'blue_eyes_white_dragon') {
+      const partnerId = attacker.unitId === 'kaiser_sea_horse' ? 'blue_eyes_white_dragon' : 'kaiser_sea_horse';
+      if (alliesAdjacentTo(attacker).some(a => a.unitId === partnerId)) bonus += 6;
+    }
+
+    if (attacker.unitId === 'dark_magician_girl') {
+      bonus += 2 * (attacker.team === 'player' ? playerDeaths : enemyDeaths);
+    }
+
+    return bonus;
+  }
+
+  function outgoingDamageMultiplier(attacker, defender) {
+    let mult = 1;
+    if (attacker.unitId === 'gaia_fierce_knight' && attacker.movedThisTurn) mult *= 1.25;
+    if (attacker.unitId === 'feral_imp' && defender.hp / defender.maxHp < 0.5) mult *= 1.4;
+    if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
+    return mult;
+  }
+
+  function incomingDamageMultiplier(attacker, defender) {
+    let mult = 1;
+    if (attacker.unitId !== 'summoned_skull') {
+      if (alliesAdjacentTo(defender).some(a => a.unitId === 'giant_soldier_of_stone')) mult *= 0.75;
+      if (defender.unitId === 'beaver_warrior' && !defender.movedThisTurn) mult *= 0.7;
+    }
+    if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
+    return mult;
+  }
+
+  function onUnitDeath(defender, attacker) {
+    if (defender.team === 'player') playerDeaths += 1; else enemyDeaths += 1;
+
+    if (defender.unitId === 'man_eater_bug' && attacker.alive) {
+      const retaliation = defender.maxHp;
+      attacker.hp = Math.max(0, attacker.hp - retaliation);
+      log(labelOf(defender) + "'s trap deals " + retaliation + ' dmg to ' + labelOf(attacker) + '!');
+      if (attacker.hp <= 0) {
+        attacker.alive = false;
+        log(labelOf(attacker) + ' is destroyed!');
+        onUnitDeath(attacker, defender);
+      }
+    }
+
+    if (attacker.unitId === 'baby_dragon') {
+      attacker.atk += 3;
+      log(labelOf(attacker) + ' grows stronger! (+3 ATK)');
+    }
+
+    if (attacker.unitId === 'flame_swordsman') {
+      const splashTargets = units.filter(u => u.alive && u.team !== attacker.team && manhattan(u.x, u.y, defender.x, defender.y) === 1);
+      splashTargets.forEach(t => {
+        const splashDmg = Math.max(1, Math.round(attacker.atk * 0.5));
+        t.hp = Math.max(0, t.hp - splashDmg);
+        log('Blaze scorches ' + labelOf(t) + ' for ' + splashDmg + ' dmg.');
+        if (t.hp <= 0) {
+          t.alive = false;
+          log(labelOf(t) + ' is destroyed!');
+          onUnitDeath(t, attacker);
+        }
+      });
+    }
+  }
+
   // ---------- Combat ----------
 
-  function doAttack(attacker, defender) {
+  function applyAttackDamage(attacker, defender) {
+    if (!defender.alive) return;
+
     const variance = 0.85 + Math.random() * 0.3;
-    const dmg = Math.max(1, Math.round(attacker.atk * variance));
+    let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
+    dmg *= outgoingDamageMultiplier(attacker, defender);
+    dmg *= incomingDamageMultiplier(attacker, defender);
+    dmg = Math.max(1, Math.round(dmg));
+
+    if (defender.unitId === 'kuriboh' && !defender.usedSacrifice) {
+      defender.usedSacrifice = true;
+      log(labelOf(defender) + ' sacrifices itself, negating the attack!');
+      return;
+    }
+
     defender.hp = Math.max(0, defender.hp - dmg);
     log(labelOf(attacker) + ' hits ' + labelOf(defender) + ' for ' + dmg + ' dmg.');
+
     if (defender.hp <= 0) {
       defender.alive = false;
       log(labelOf(defender) + ' is destroyed!');
+      onUnitDeath(defender, attacker);
+    } else if (defender.unitId === 'celtic_guardian' && manhattan(attacker.x, attacker.y, defender.x, defender.y) === 1) {
+      const counterDmg = Math.max(1, Math.round(defender.atk * 0.5));
+      attacker.hp = Math.max(0, attacker.hp - counterDmg);
+      log(labelOf(defender) + ' parries, striking back for ' + counterDmg + ' dmg!');
+      if (attacker.hp <= 0) {
+        attacker.alive = false;
+        log(labelOf(attacker) + ' is destroyed!');
+        onUnitDeath(attacker, defender);
+      }
     }
+  }
+
+  function getAttackTargets(attacker, primaryDefender) {
+    if (attacker.unitId === 'dark_magician') {
+      return units.filter(u => u.alive && u.team !== attacker.team &&
+        (u.x === attacker.x || u.y === attacker.y) &&
+        manhattan(attacker.x, attacker.y, u.x, u.y) <= attacker.range);
+    }
+    return [primaryDefender];
+  }
+
+  function resolveAttack(attacker, primaryDefender) {
+    const targets = getAttackTargets(attacker, primaryDefender);
+    targets.forEach(target => applyAttackDamage(attacker, target));
   }
 
   function checkGameOver() {
@@ -579,9 +732,18 @@
     if (target && target.team === 'enemy') {
       if (attackableTargets.some(u => u === target)) {
         const attacker = selectedUnit;
-        doAttack(attacker, target);
-        finalize(attacker);
-        checkGameOver();
+        resolveAttack(attacker, target);
+        attacker.attacksUsed += 1;
+        if (checkGameOver()) return;
+
+        const targetsLeft = attacker.alive ? enemiesInRange(attacker.x, attacker.y, attacker.range, 'player') : [];
+        if (attacker.alive && attacker.attacksUsed < attacksPerTurn(attacker) && targetsLeft.length > 0) {
+          attackableTargets = targetsLeft;
+        } else if (attacker.alive) {
+          finalize(attacker);
+        } else {
+          deselect();
+        }
       }
       render();
       return;
@@ -596,6 +758,7 @@
       selectedUnit.x = tx;
       selectedUnit.y = ty;
       selectedUnit.hasMoved = true;
+      selectedUnit.movedThisTurn = true;
       reachableTiles = [];
       attackableTargets = enemiesInRange(tx, ty, selectedUnit.range, 'player');
       if (attackableTargets.length === 0) {
@@ -649,6 +812,14 @@
     endTurnBtn.disabled = true;
     turnIndicatorEl.textContent = 'ENEMY TURN';
     turnIndicatorEl.className = 'enemy';
+
+    units.filter(u => u.team === 'enemy' && u.alive).forEach(u => {
+      u.hasMoved = false;
+      u.turnDone = false;
+      u.movedThisTurn = false;
+      u.attacksUsed = 0;
+    });
+    applyTurnStartEffects('enemy');
     render();
 
     const enemyUnits = units.filter(u => u.team === 'enemy');
@@ -668,6 +839,7 @@
       if (dest.x !== unit.x || dest.y !== unit.y) {
         unit.x = dest.x;
         unit.y = dest.y;
+        unit.movedThisTurn = true;
         log(labelOf(unit) + (isRetreat ? ' retreats.' : ' advances.'));
       }
       render();
@@ -675,13 +847,15 @@
       await delay(350);
 
       if (!isRetreat) {
-        const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
-        if (inRange.length > 0) {
+        let inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
+        while (unit.alive && inRange.length > 0 && unit.attacksUsed < attacksPerTurn(unit)) {
           inRange.sort((a, b) => a.hp - b.hp);
-          doAttack(unit, inRange[0]);
+          resolveAttack(unit, inRange[0]);
+          unit.attacksUsed += 1;
           render();
           if (checkGameOver()) { aiRunning = false; return; }
           await delay(400);
+          inRange = unit.alive ? enemiesInRange(unit.x, unit.y, unit.range, 'enemy') : [];
         }
       }
     }
@@ -698,12 +872,28 @@
     units.filter(u => u.team === 'player' && u.alive).forEach(u => {
       u.hasMoved = false;
       u.turnDone = false;
+      u.movedThisTurn = false;
+      u.attacksUsed = 0;
     });
+    applyTurnStartEffects('player');
     turnIndicatorEl.textContent = 'PLAYER TURN';
     turnIndicatorEl.className = 'player';
     roundCounterEl.textContent = 'ROUND ' + round;
     endTurnBtn.disabled = false;
     render();
+  }
+
+  function applyTurnStartEffects(team) {
+    units.filter(u => u.alive && u.team === team && u.unitId === 'mystical_elf').forEach(healer => {
+      const target = alliesAdjacentTo(healer)
+        .filter(a => a.hp < a.maxHp)
+        .sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp))[0];
+      if (target) {
+        const healAmt = Math.min(10, target.maxHp - target.hp);
+        target.hp += healAmt;
+        log(labelOf(healer) + ' blesses ' + labelOf(target) + ' for ' + healAmt + ' HP.');
+      }
+    });
   }
 
   // ---------- Rendering ----------
@@ -743,6 +933,42 @@
         ctx.lineTo(cx - size * 0.6, cy - size);
         ctx.lineTo(cx - size * 0.2, cy);
         ctx.lineTo(cx - size * 0.6, cy + size);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Insect':
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2;
+          const px = cx + size * Math.cos(angle);
+          const py = cy + size * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Beast':
+        ctx.beginPath();
+        ctx.moveTo(cx - size, cy - size * 0.8);
+        ctx.lineTo(cx + size, cy - size * 0.8);
+        ctx.lineTo(cx, cy + size);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Sea Serpent':
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, size * 1.1, size * 0.7, 0, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        break;
+      case 'Beast-Warrior':
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
+          const px = cx + size * Math.cos(angle);
+          const py = cy + size * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
         ctx.closePath();
         ctx.fill(); ctx.stroke();
         break;
@@ -833,7 +1059,8 @@
       '<div class="stat-row"><span>HP</span><span>' + u.hp + ' / ' + u.maxHp + '</span></div>' +
       '<div class="stat-row"><span>ATK</span><span>' + u.atk + '</span></div>' +
       '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
-      '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>'
+      '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>' +
+      '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>'
     );
   }
 
@@ -964,6 +1191,7 @@
           '<div class="unit-card-stats">' +
             '<span>HP ' + u.hp + '</span><span>ATK ' + u.atk + '</span><span>MOV ' + u.move + '</span><span>RNG ' + u.range + '</span>' +
           '</div>' +
+          '<div class="unit-card-effect">' + u.effect + '</div>' +
         '</div>'
       );
     }).join('');
@@ -1093,6 +1321,7 @@
         '<div class="unit-card' + (isSelected ? ' selected' : '') + '" data-unit-id="' + id + '">' +
           '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
           '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+          '<div class="unit-card-effect">' + u.effect + '</div>' +
         '</div>'
       );
     }).join('') || '<div class="empty-hint">All units deployed.</div>';
