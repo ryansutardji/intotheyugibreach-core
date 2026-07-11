@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tactics Skirmish</title>
+<style>
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0f0f1a;
+    color: #c9d6a3;
+    font-family: 'Courier New', Courier, monospace;
+    height: 100%;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  .game-container {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    background: #1a1a2e;
+    padding: 16px;
+    border: 4px solid #44445a;
+    box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
+  }
+
+  .board-wrap {
+    position: relative;
+    line-height: 0;
+  }
+
+  #board {
+    background: #2d2d44;
+    border: 4px solid #44445a;
+    image-rendering: pixelated;
+    cursor: pointer;
+    display: block;
+  }
+
+  #overlay-banner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(10, 10, 20, 0.86);
+    border: 4px solid #44445a;
+    text-align: center;
+    padding: 20px;
+  }
+
+  #overlay-banner.show { display: flex; }
+
+  #overlay-banner h2 {
+    font-size: 28px;
+    letter-spacing: 2px;
+    margin: 0 0 12px 0;
+    text-shadow: 3px 3px 0 #000;
+  }
+
+  #overlay-banner.victory h2 { color: #9bbc0f; }
+  #overlay-banner.defeat h2 { color: #ef4444; }
+
+  .sidebar {
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  h1.title {
+    font-size: 18px;
+    letter-spacing: 3px;
+    margin: 0;
+    padding: 10px;
+    text-align: center;
+    background: #26263a;
+    border: 2px solid #44445a;
+    color: #9bbc0f;
+    text-shadow: 2px 2px 0 #000;
+  }
+
+  .panel {
+    background: #26263a;
+    border: 2px solid #44445a;
+    padding: 10px;
+  }
+
+  .panel h3 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: #8bac0f;
+    border-bottom: 1px solid #44445a;
+    padding-bottom: 6px;
+  }
+
+  #turn-indicator {
+    font-size: 14px;
+    text-align: center;
+    padding: 8px;
+    letter-spacing: 2px;
+  }
+
+  #turn-indicator.player { color: #4a9eff; }
+  #turn-indicator.enemy { color: #ef4444; }
+
+  #round-counter {
+    font-size: 10px;
+    text-align: center;
+    color: #666a80;
+    margin-top: -6px;
+  }
+
+  #unit-info {
+    font-size: 12px;
+    min-height: 96px;
+    line-height: 1.6;
+  }
+
+  #unit-info .empty-hint {
+    color: #666a80;
+    font-size: 11px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .stat-row span:last-child { color: #f0e68c; }
+
+  #battle-log {
+    font-size: 11px;
+    height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  #battle-log div { border-bottom: 1px dotted #333850; padding-bottom: 3px; }
+  #battle-log div:last-child { color: #f0e68c; }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  button {
+    flex: 1;
+    font-family: inherit;
+    background: #3a3a54;
+    color: #c9d6a3;
+    border: 2px solid #55557a;
+    padding: 10px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) { background: #4a4a6a; color: #fff; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { border-color: #8bac0f; color: #9bbc0f; }
+  button.primary:hover:not(:disabled) { background: #2f4a1f; }
+
+  .legend {
+    font-size: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .legend-row { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 12px; height: 12px; flex-shrink: 0; border: 1px solid #000; }
+  .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="game-container">
+  <div class="board-wrap">
+    <canvas id="board" width="512" height="512"></canvas>
+    <div id="overlay-banner">
+      <h2 id="banner-text">VICTORY</h2>
+      <div id="banner-sub" style="font-size:11px; color:#c9d6a3; margin-bottom:14px;"></div>
+      <button class="primary" id="banner-restart" style="max-width:160px;">RESTART</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <h1 class="title">TACTICS SKIRMISH</h1>
+
+    <div class="panel">
+      <div id="turn-indicator" class="player">PLAYER TURN</div>
+      <div id="round-counter">ROUND 1</div>
+    </div>
+
+    <div class="panel">
+      <h3>UNIT INFO</h3>
+      <div id="unit-info"><div class="empty-hint">Click one of your units to select it.</div></div>
+    </div>
+
+    <div class="panel">
+      <h3>BATTLE LOG</h3>
+      <div id="battle-log"></div>
+    </div>
+
+    <div class="btn-row">
+      <button id="end-turn-btn" class="primary">END TURN</button>
+      <button id="restart-btn">RESTART</button>
+    </div>
+
+    <div class="panel legend">
+      <h3 style="margin-bottom:6px;">LEGEND</h3>
+      <div class="legend-row"><div class="swatch" style="background:#3b82f6"></div> Your Soldier — balanced, mid range</div>
+      <div class="legend-row"><div class="swatch" style="background:#22d3ee"></div> Your Archer — frail, long range</div>
+      <div class="legend-row"><div class="swatch" style="background:#1e3a8a"></div> Your Tank — tough, slow, short range</div>
+      <div class="legend-row"><div class="swatch" style="background:#ef4444"></div> Enemy Soldier</div>
+      <div class="legend-row"><div class="swatch" style="background:#f97316"></div> Enemy Archer</div>
+      <div class="legend-row"><div class="swatch" style="background:#7f1d1d"></div> Enemy Tank</div>
+      <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const GRID = 8;
+  const TILE = 64;
+
+  const UNIT_TYPES = {
+    soldier: { name: 'Soldier', hp: 100, atk: 20, move: 3, range: 1 },
+    archer:  { name: 'Archer',  hp: 55,  atk: 16, move: 3, range: 3 },
+    tank:    { name: 'Tank',    hp: 170, atk: 24, move: 2, range: 1 },
+  };
+
+  const TEAM_COLORS = {
+    player: { soldier: '#3b82f6', archer: '#22d3ee', tank: '#1e3a8a' },
+    enemy:  { soldier: '#ef4444', archer: '#f97316', tank: '#7f1d1d' },
+  };
+
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const turnIndicatorEl = document.getElementById('turn-indicator');
+  const roundCounterEl = document.getElementById('round-counter');
+  const unitInfoEl = document.getElementById('unit-info');
+  const battleLogEl = document.getElementById('battle-log');
+  const endTurnBtn = document.getElementById('end-turn-btn');
+  const restartBtn = document.getElementById('restart-btn');
+  const bannerEl = document.getElementById('overlay-banner');
+  const bannerTextEl = document.getElementById('banner-text');
+  const bannerSubEl = document.getElementById('banner-sub');
+  const bannerRestartBtn = document.getElementById('banner-restart');
+
+  let units = [];
+  let nextId = 1;
+  let currentTurn = 'player'; // 'player' | 'enemy'
+  let round = 1;
+  let gameOver = false;
+  let aiRunning = false;
+
+  let selectedUnit = null;
+  let reachableTiles = [];
+  let attackableTargets = [];
+  let hoveredTile = null;
+
+  function makeUnit(team, type, x, y) {
+    const t = UNIT_TYPES[type];
+    return {
+      id: nextId++, team, type, x, y,
+      hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
+      alive: true, hasMoved: false, turnDone: false,
+    };
+  }
+
+  function initUnits() {
+    units = [
+      makeUnit('player', 'archer',  0, 2),
+      makeUnit('player', 'soldier', 1, 4),
+      makeUnit('player', 'tank',    0, 6),
+      makeUnit('enemy', 'tank',    7, 1),
+      makeUnit('enemy', 'soldier', 6, 3),
+      makeUnit('enemy', 'archer',  7, 5),
+    ];
+  }
+
+  function manhattan(x1, y1, x2, y2) {
+    return Math.abs(x1 - x2) + Math.abs(y1 - y2);
+  }
+
+  function unitAt(x, y) {
+    return units.find(u => u.alive && u.x === x && u.y === y) || null;
+  }
+
+  function occupiedSet(excludeUnit) {
+    const s = new Set();
+    units.forEach(u => { if (u.alive && u !== excludeUnit) s.add(u.x + ',' + u.y); });
+    return s;
+  }
+
+  function bfsReachable(unit) {
+    const occupied = occupiedSet(unit);
+    const start = { x: unit.x, y: unit.y };
+    const visited = new Map([[start.x + ',' + start.y, 0]]);
+    const queue = [start];
+    const result = [start];
+    while (queue.length) {
+      const cur = queue.shift();
+      const dist = visited.get(cur.x + ',' + cur.y);
+      if (dist >= unit.move) continue;
+      const neighbors = [
+        { x: cur.x + 1, y: cur.y }, { x: cur.x - 1, y: cur.y },
+        { x: cur.x, y: cur.y + 1 }, { x: cur.x, y: cur.y - 1 },
+      ];
+      for (const n of neighbors) {
+        if (n.x < 0 || n.x >= GRID || n.y < 0 || n.y >= GRID) continue;
+        const key = n.x + ',' + n.y;
+        if (visited.has(key) || occupied.has(key)) continue;
+        visited.set(key, dist + 1);
+        queue.push(n);
+        result.push(n);
+      }
+    }
+    return result;
+  }
+
+  function enemiesInRange(x, y, range, team) {
+    return units.filter(u => u.alive && u.team !== team && manhattan(x, y, u.x, u.y) <= range);
+  }
+
+  function log(msg) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    battleLogEl.appendChild(div);
+    battleLogEl.scrollTop = battleLogEl.scrollHeight;
+    while (battleLogEl.children.length > 60) battleLogEl.removeChild(battleLogEl.firstChild);
+  }
+
+  function labelOf(u) {
+    return (u.team === 'player' ? 'Your' : 'Enemy') + ' ' + UNIT_TYPES[u.type].name;
+  }
+
+  // ---------- Combat ----------
+
+  function doAttack(attacker, defender) {
+    const variance = 0.85 + Math.random() * 0.3;
+    const dmg = Math.max(1, Math.round(attacker.atk * variance));
+    defender.hp = Math.max(0, defender.hp - dmg);
+    log(labelOf(attacker) + ' hits ' + labelOf(defender) + ' for ' + dmg + ' dmg.');
+    if (defender.hp <= 0) {
+      defender.alive = false;
+      log(labelOf(defender) + ' is destroyed!');
+    }
+  }
+
+  function checkGameOver() {
+    const playerAlive = units.some(u => u.team === 'player' && u.alive);
+    const enemyAlive = units.some(u => u.team === 'enemy' && u.alive);
+    if (!enemyAlive) { endGame(true); return true; }
+    if (!playerAlive) { endGame(false); return true; }
+    return false;
+  }
+
+  function endGame(victory) {
+    gameOver = true;
+    selectedUnit = null;
+    reachableTiles = [];
+    attackableTargets = [];
+    bannerEl.classList.add('show');
+    bannerEl.classList.toggle('victory', victory);
+    bannerEl.classList.toggle('defeat', !victory);
+    bannerTextEl.textContent = victory ? 'VICTORY' : 'DEFEAT';
+    bannerSubEl.textContent = victory
+      ? 'All enemy units eliminated.'
+      : 'Your squad has fallen.';
+    endTurnBtn.disabled = true;
+    render();
+  }
+
+  // ---------- Player turn logic ----------
+
+  function selectUnit(u) {
+    if (u.turnDone) return;
+    selectedUnit = u;
+    reachableTiles = u.hasMoved ? [] : bfsReachable(u);
+    attackableTargets = enemiesInRange(u.x, u.y, u.range, 'player');
+    render();
+  }
+
+  function deselect() {
+    selectedUnit = null;
+    reachableTiles = [];
+    attackableTargets = [];
+    render();
+  }
+
+  function finalize(u) {
+    u.turnDone = true;
+    u.hasMoved = true;
+    deselect();
+    maybeAutoEndPlayerTurn();
+  }
+
+  function maybeAutoEndPlayerTurn() {
+    if (gameOver) return;
+    const playerUnits = units.filter(u => u.team === 'player' && u.alive);
+    if (playerUnits.length > 0 && playerUnits.every(u => u.turnDone)) {
+      setTimeout(() => startEnemyTurn(), 350);
+    }
+  }
+
+  function handleBoardClick(tx, ty) {
+    if (gameOver || currentTurn !== 'player' || aiRunning) return;
+    const target = unitAt(tx, ty);
+
+    if (!selectedUnit) {
+      if (target && target.team === 'player' && !target.turnDone) selectUnit(target);
+      return;
+    }
+
+    if (target === selectedUnit) {
+      if (!selectedUnit.hasMoved) {
+        deselect();
+      } else {
+        log(labelOf(selectedUnit) + ' holds position.');
+        finalize(selectedUnit);
+      }
+      return;
+    }
+
+    if (target && target.team === 'enemy') {
+      if (attackableTargets.some(u => u === target)) {
+        const attacker = selectedUnit;
+        doAttack(attacker, target);
+        finalize(attacker);
+        checkGameOver();
+      }
+      render();
+      return;
+    }
+
+    if (target && target.team === 'player' && !target.turnDone) {
+      selectUnit(target);
+      return;
+    }
+
+    if (!target && !selectedUnit.hasMoved && reachableTiles.some(t => t.x === tx && t.y === ty)) {
+      selectedUnit.x = tx;
+      selectedUnit.y = ty;
+      selectedUnit.hasMoved = true;
+      reachableTiles = [];
+      attackableTargets = enemiesInRange(tx, ty, selectedUnit.range, 'player');
+      if (attackableTargets.length === 0) {
+        finalize(selectedUnit);
+      } else {
+        render();
+      }
+      return;
+    }
+
+    deselect();
+  }
+
+  function forceEndPlayerTurn() {
+    if (gameOver || currentTurn !== 'player' || aiRunning) return;
+    units.filter(u => u.team === 'player' && u.alive).forEach(u => { u.turnDone = true; u.hasMoved = true; });
+    deselect();
+    startEnemyTurn();
+  }
+
+  // ---------- AI turn logic ----------
+
+  function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+  function chooseAIMove(unit, tiles, targets, isRetreat) {
+    function nearestDist(pos) {
+      let min = Infinity;
+      for (const t of targets) {
+        const d = manhattan(pos.x, pos.y, t.x, t.y);
+        if (d < min) min = d;
+      }
+      return min;
+    }
+    let best = tiles[0];
+    let bestScore = isRetreat ? -Infinity : Infinity;
+    for (const tile of tiles) {
+      const d = nearestDist(tile);
+      if (isRetreat) {
+        if (d > bestScore) { bestScore = d; best = tile; }
+      } else {
+        const score = d <= unit.range ? d - 1000 : d;
+        if (score < bestScore) { bestScore = score; best = tile; }
+      }
+    }
+    return best;
+  }
+
+  async function startEnemyTurn() {
+    currentTurn = 'enemy';
+    aiRunning = true;
+    endTurnBtn.disabled = true;
+    turnIndicatorEl.textContent = 'ENEMY TURN';
+    turnIndicatorEl.className = 'enemy';
+    render();
+
+    const enemyUnits = units.filter(u => u.team === 'enemy');
+
+    for (const unit of enemyUnits) {
+      if (!unit.alive || gameOver) continue;
+
+      const targets = units.filter(u => u.team === 'player' && u.alive);
+      if (targets.length === 0) break;
+
+      await delay(400);
+
+      const isRetreat = unit.hp / unit.maxHp < 0.3;
+      const tiles = bfsReachable(unit);
+      const dest = chooseAIMove(unit, tiles, targets, isRetreat);
+
+      if (dest.x !== unit.x || dest.y !== unit.y) {
+        unit.x = dest.x;
+        unit.y = dest.y;
+        log(labelOf(unit) + (isRetreat ? ' retreats.' : ' advances.'));
+      }
+      render();
+
+      await delay(350);
+
+      if (!isRetreat) {
+        const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
+        if (inRange.length > 0) {
+          inRange.sort((a, b) => a.hp - b.hp);
+          doAttack(unit, inRange[0]);
+          render();
+          if (checkGameOver()) { aiRunning = false; return; }
+          await delay(400);
+        }
+      }
+    }
+
+    if (checkGameOver()) { aiRunning = false; return; }
+
+    aiRunning = false;
+    startPlayerTurn();
+  }
+
+  function startPlayerTurn() {
+    round += 1;
+    currentTurn = 'player';
+    units.filter(u => u.team === 'player' && u.alive).forEach(u => {
+      u.hasMoved = false;
+      u.turnDone = false;
+    });
+    turnIndicatorEl.textContent = 'PLAYER TURN';
+    turnIndicatorEl.className = 'player';
+    roundCounterEl.textContent = 'ROUND ' + round;
+    endTurnBtn.disabled = false;
+    render();
+  }
+
+  // ---------- Rendering ----------
+
+  function drawUnitShape(u, cx, cy, size) {
+    const color = TEAM_COLORS[u.team][u.type];
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#0a0a12';
+    ctx.lineWidth = 2;
+
+    if (u.type === 'soldier') {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - size);
+      ctx.lineTo(cx + size, cy);
+      ctx.lineTo(cx, cy + size);
+      ctx.lineTo(cx - size, cy);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (u.type === 'archer') {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - size);
+      ctx.lineTo(cx + size, cy + size * 0.8);
+      ctx.lineTo(cx - size, cy + size * 0.8);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
+      ctx.strokeRect(cx - size, cy - size, size * 2, size * 2);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? '#2d2d44' : '#26263a';
+        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+      }
+    }
+
+    if (selectedUnit && !gameOver) {
+      ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
+      reachableTiles.forEach(t => {
+        if (t.x === selectedUnit.x && t.y === selectedUnit.y) return;
+        ctx.fillRect(t.x * TILE, t.y * TILE, TILE, TILE);
+      });
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 3;
+      attackableTargets.forEach(u => {
+        ctx.strokeRect(u.x * TILE + 2, u.y * TILE + 2, TILE - 4, TILE - 4);
+      });
+    }
+
+    ctx.strokeStyle = '#44445a';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= GRID; i++) {
+      ctx.beginPath(); ctx.moveTo(i * TILE, 0); ctx.lineTo(i * TILE, canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * TILE); ctx.lineTo(canvas.width, i * TILE); ctx.stroke();
+    }
+
+    units.filter(u => u.alive).forEach(u => {
+      const cx = u.x * TILE + TILE / 2;
+      const cy = u.y * TILE + TILE / 2;
+
+      ctx.save();
+      if (u.team === 'player' && u.turnDone) ctx.globalAlpha = 0.45;
+
+      if (u === selectedUnit) {
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(u.x * TILE + 3, u.y * TILE + 3, TILE - 6, TILE - 6);
+      }
+
+      drawUnitShape(u, cx, cy, 18);
+
+      const barW = 40, barH = 6;
+      const barX = cx - barW / 2, barY = u.y * TILE + 6;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+      const pct = u.hp / u.maxHp;
+      ctx.fillStyle = pct > 0.5 ? '#8bac0f' : pct > 0.25 ? '#f0e68c' : '#ef4444';
+      ctx.fillRect(barX, barY, barW * pct, barH);
+
+      ctx.restore();
+    });
+  }
+
+  function render() {
+    draw();
+    updateUnitInfo();
+  }
+
+  function statsHtml(u) {
+    return (
+      '<div style="color:' + TEAM_COLORS[u.team][u.type] + '; font-weight:bold; margin-bottom:4px;">' +
+      labelOf(u) + (u.turnDone ? ' (done)' : '') + '</div>' +
+      '<div class="stat-row"><span>HP</span><span>' + u.hp + ' / ' + u.maxHp + '</span></div>' +
+      '<div class="stat-row"><span>ATK</span><span>' + u.atk + '</span></div>' +
+      '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
+      '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>'
+    );
+  }
+
+  function updateUnitInfo() {
+    const u = selectedUnit || hoveredTile;
+    if (u) {
+      unitInfoEl.innerHTML = statsHtml(u);
+    } else {
+      unitInfoEl.innerHTML = '<div class="empty-hint">Click one of your units to select it.</div>';
+    }
+  }
+
+  // ---------- Input ----------
+
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    if (tx < 0 || tx >= GRID || ty < 0 || ty >= GRID) return;
+    handleBoardClick(tx, ty);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    const u = (tx >= 0 && tx < GRID && ty >= 0 && ty < GRID) ? unitAt(tx, ty) : null;
+    if (u !== hoveredTile) {
+      hoveredTile = u;
+      if (!selectedUnit) updateUnitInfo();
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoveredTile = null;
+    if (!selectedUnit) updateUnitInfo();
+  });
+
+  endTurnBtn.addEventListener('click', forceEndPlayerTurn);
+  restartBtn.addEventListener('click', restartGame);
+  bannerRestartBtn.addEventListener('click', restartGame);
+
+  function restartGame() {
+    nextId = 1;
+    currentTurn = 'player';
+    round = 1;
+    gameOver = false;
+    aiRunning = false;
+    selectedUnit = null;
+    reachableTiles = [];
+    attackableTargets = [];
+    hoveredTile = null;
+    battleLogEl.innerHTML = '';
+    bannerEl.classList.remove('show', 'victory', 'defeat');
+    endTurnBtn.disabled = false;
+    initUnits();
+    turnIndicatorEl.textContent = 'PLAYER TURN';
+    turnIndicatorEl.className = 'player';
+    roundCounterEl.textContent = 'ROUND ' + round;
+    log('Battle begins! Eliminate all enemy units to win.');
+    render();
+  }
+
+  // ---------- Init ----------
+  initUnits();
+  log('Battle begins! Eliminate all enemy units to win.');
+  render();
+})();
+</script>
+</body>
+</html>
