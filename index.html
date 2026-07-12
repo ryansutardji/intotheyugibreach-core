@@ -76,6 +76,14 @@
   #overlay-banner.victory h2 { color: #9bbc0f; }
   #overlay-banner.defeat h2 { color: #ef4444; }
 
+  #banner-stage-ladder { display:flex; gap:6px; margin:6px 0 14px 0; }
+  #banner-stage-ladder .stage-node {
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid #44445a; background:#26263a;
+  }
+  #banner-stage-ladder .stage-node.cleared { background:#8bac0f; border-color:#8bac0f; }
+  #banner-stage-ladder .stage-node.current { border-color:#f0e68c; }
+
   .sidebar {
     width: 300px;
     display: flex;
@@ -125,6 +133,14 @@
     text-align: center;
     color: #666a80;
     margin-top: -6px;
+  }
+
+  #stage-indicator {
+    font-size: 11px;
+    text-align: center;
+    color: #8bac0f;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
   }
 
   #unit-info {
@@ -336,6 +352,7 @@
   <h1 class="title">DRAFT YOUR TEAM</h1>
 
   <div class="panel">
+    <div id="stage-indicator">STAGE <span id="stage-current">1</span> / <span id="stage-total">5</span></div>
     <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
   </div>
 
@@ -363,6 +380,7 @@
     <canvas id="board" width="512" height="512"></canvas>
     <div id="overlay-banner">
       <h2 id="banner-text">VICTORY</h2>
+      <div id="banner-stage-ladder"></div>
       <div id="banner-sub" style="font-size:11px; color:#c9d6a3; margin-bottom:14px;"></div>
       <button class="primary" id="banner-restart" style="max-width:160px;">RESTART</button>
     </div>
@@ -465,6 +483,7 @@
   const bannerTextEl = document.getElementById('banner-text');
   const bannerSubEl = document.getElementById('banner-sub');
   const bannerRestartBtn = document.getElementById('banner-restart');
+  const bannerStageLadderEl = document.getElementById('banner-stage-ladder');
   const legendRowsEl = document.getElementById('legend-rows');
   const draftScreenEl = document.getElementById('draft-screen');
   const gameContainerEl = document.querySelector('.game-container');
@@ -484,6 +503,10 @@
   let round = 1;
   let gameOver = false;
   let aiRunning = false;
+
+  let stage = 1;
+  const TOTAL_STAGES = 5;
+  let bannerAdvances = false;
 
   let selectedUnit = null;
   let reachableTiles = [];
@@ -713,18 +736,44 @@
     return false;
   }
 
+  function renderStageLadder(containerEl) {
+    let html = '';
+    for (let i = 1; i <= TOTAL_STAGES; i++) {
+      let cls = 'stage-node';
+      if (i < stage) cls += ' cleared';
+      else if (i === stage) cls += ' current';
+      html += '<div class="' + cls + '"></div>';
+    }
+    containerEl.innerHTML = html;
+  }
+
   function endGame(victory) {
     gameOver = true;
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
+
+    bannerAdvances = victory && stage < TOTAL_STAGES;
+
     bannerEl.classList.add('show');
     bannerEl.classList.toggle('victory', victory);
     bannerEl.classList.toggle('defeat', !victory);
-    bannerTextEl.textContent = victory ? 'VICTORY' : 'DEFEAT';
-    bannerSubEl.textContent = victory
-      ? 'All enemy units eliminated.'
-      : 'Your squad has fallen.';
+    renderStageLadder(bannerStageLadderEl);
+
+    if (victory && stage < TOTAL_STAGES) {
+      bannerTextEl.textContent = 'STAGE ' + stage + ' CLEARED';
+      bannerSubEl.textContent = 'Advance to stage ' + (stage + 1) + '.';
+      bannerRestartBtn.textContent = 'CONTINUE';
+    } else if (victory) {
+      bannerTextEl.textContent = 'RUN COMPLETE';
+      bannerSubEl.textContent = 'All ' + TOTAL_STAGES + ' stages cleared!';
+      bannerRestartBtn.textContent = 'NEW RUN';
+    } else {
+      bannerTextEl.textContent = 'DEFEAT';
+      bannerSubEl.textContent = 'Your squad has fallen at stage ' + stage + '.';
+      bannerRestartBtn.textContent = 'NEW RUN';
+    }
+
     endTurnBtn.disabled = true;
     render();
   }
@@ -1107,9 +1156,12 @@
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
   restartBtn.addEventListener('click', resetToDraftScreen);
-  bannerRestartBtn.addEventListener('click', resetToDraftScreen);
+  bannerRestartBtn.addEventListener('click', () => {
+    if (bannerAdvances) advanceStage();
+    else resetToDraftScreen();
+  });
 
-  function resetToDraftScreen() {
+  function resetBattleAndDraftState() {
     phase = 'draft';
     units = [];
     nextId = 1;
@@ -1121,6 +1173,7 @@
     reachableTiles = [];
     attackableTargets = [];
     hoveredTile = null;
+    bannerAdvances = false;
     battleLogEl.innerHTML = '';
     bannerEl.classList.remove('show', 'victory', 'defeat');
     endTurnBtn.disabled = false;
@@ -1135,7 +1188,18 @@
     pickerPanelEl.style.display = 'block';
     confirmTeamBtn.style.display = 'block';
     resultsPanelEl.style.display = 'none';
+    renderStageIndicator();
     renderUnitGrid();
+  }
+
+  function resetToDraftScreen() {
+    stage = 1;
+    resetBattleAndDraftState();
+  }
+
+  function advanceStage() {
+    stage += 1;
+    resetBattleAndDraftState();
   }
 
   // ---------- Draft ----------
@@ -1151,6 +1215,8 @@
   const resultsPanelEl = document.getElementById('results-panel');
   const resultsContentEl = document.getElementById('results-content');
   const redraftBtn = document.getElementById('redraft-btn');
+  const stageCurrentEl = document.getElementById('stage-current');
+  const stageTotalEl = document.getElementById('stage-total');
 
   function playerSpent() {
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
@@ -1168,6 +1234,15 @@
       remaining -= UNIT_DATABASE[pick].cost;
     }
     return team;
+  }
+
+  function aiBudgetForStage(stageNum) {
+    return DRAFT_BUDGET + (stageNum - 1) * 3;
+  }
+
+  function renderStageIndicator() {
+    stageCurrentEl.textContent = stage;
+    stageTotalEl.textContent = TOTAL_STAGES;
   }
 
   function renderUnitGrid() {
@@ -1215,7 +1290,7 @@
     renderUnitGrid();
   });
 
-  function rosterHtml(label, teamIds) {
+  function rosterHtml(label, teamIds, budget = DRAFT_BUDGET) {
     const total = teamIds.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
     const rows = teamIds.map(id => {
       const u = UNIT_DATABASE[id];
@@ -1224,15 +1299,15 @@
     return (
       '<div class="roster-label">' + label + '</div>' +
       rows +
-      '<div class="stat-row roster-total"><span>TOTAL</span><span>' + total + ' / ' + DRAFT_BUDGET + '</span></div>'
+      '<div class="stat-row roster-total"><span>TOTAL</span><span>' + total + ' / ' + budget + '</span></div>'
     );
   }
 
   confirmTeamBtn.addEventListener('click', () => {
-    confirmedAiTeam = draftAITeam(DRAFT_BUDGET);
+    confirmedAiTeam = draftAITeam(aiBudgetForStage(stage));
     resultsContentEl.innerHTML =
-      rosterHtml('YOUR TEAM', selectedPlayerUnits) +
-      rosterHtml('ENEMY TEAM', confirmedAiTeam);
+      rosterHtml('YOUR TEAM', selectedPlayerUnits, DRAFT_BUDGET) +
+      rosterHtml('ENEMY TEAM (STAGE ' + stage + ')', confirmedAiTeam, aiBudgetForStage(stage));
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
     resultsPanelEl.style.display = 'block';
@@ -1247,6 +1322,7 @@
     renderUnitGrid();
   });
 
+  renderStageIndicator();
   renderUnitGrid();
 
   // ---------- Placement ----------
