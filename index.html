@@ -76,14 +76,6 @@
   #overlay-banner.victory h2 { color: #9bbc0f; }
   #overlay-banner.defeat h2 { color: #ef4444; }
 
-  #banner-stage-ladder { display:flex; gap:6px; margin:6px 0 14px 0; }
-  #banner-stage-ladder .stage-node {
-    width:14px; height:14px; border-radius:50%;
-    border:2px solid #44445a; background:#26263a;
-  }
-  #banner-stage-ladder .stage-node.cleared { background:#8bac0f; border-color:#8bac0f; }
-  #banner-stage-ladder .stage-node.current { border-color:#f0e68c; }
-
   .sidebar {
     width: 300px;
     display: flex;
@@ -135,7 +127,7 @@
     margin-top: -6px;
   }
 
-  #stage-indicator {
+  #mission-indicator {
     font-size: 11px;
     text-align: center;
     color: #8bac0f;
@@ -231,6 +223,8 @@
   .swatch { width: 18px; height: 18px; flex-shrink: 0; border: 1px solid #000; object-fit: cover; border-radius: 50%; background: #1a1a2e; }
   .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
 
+  #home-screen,
+  #map-screen,
   #draft-screen {
     width: 640px;
     display: flex;
@@ -242,8 +236,62 @@
     box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
   }
 
+  #home-screen.hidden,
+  #map-screen.hidden,
   #draft-screen.hidden,
   .game-container.hidden { display: none; }
+
+  #home-screen .subtitle {
+    text-align: center;
+    font-size: 12px;
+    color: #666a80;
+    line-height: 1.6;
+  }
+
+  #map-canvas {
+    position: relative;
+    height: 420px;
+    background: #14141f;
+    border: 2px solid #44445a;
+  }
+
+  #map-paths {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  #map-paths line {
+    stroke: #44445a;
+    stroke-width: 2;
+    stroke-dasharray: 4 4;
+  }
+
+  .map-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 110px;
+    background: #26263a;
+    border: 2px solid #55557a;
+    padding: 8px;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .map-node:hover { border-color: #8bac0f; }
+
+  .map-node-name {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: #9bbc0f;
+    margin-bottom: 4px;
+  }
+
+  .map-node-budget {
+    font-size: 10px;
+    color: #f0e68c;
+  }
 
   #budget-meter {
     text-align: center;
@@ -348,11 +396,33 @@
 </head>
 <body>
 
-<div id="draft-screen">
+<div id="home-screen">
+  <h1 class="title">HOME BASE</h1>
+  <div class="panel">
+    <div class="subtitle">Your squad is rested and ready. Choose a mission from the map to deploy.</div>
+  </div>
+  <div class="btn-row">
+    <button id="deploy-btn" class="primary">DEPLOY</button>
+  </div>
+</div>
+
+<div id="map-screen" class="hidden">
+  <h1 class="title">SELECT A MISSION</h1>
+  <div class="panel">
+    <div id="map-canvas">
+      <svg id="map-paths"></svg>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button id="map-back-btn">BACK TO BASE</button>
+  </div>
+</div>
+
+<div id="draft-screen" class="hidden">
   <h1 class="title">DRAFT YOUR TEAM</h1>
 
   <div class="panel">
-    <div id="stage-indicator">STAGE <span id="stage-current">1</span> / <span id="stage-total">5</span></div>
+    <div id="mission-indicator">MISSION: <span id="mission-name">—</span> — BUDGET <span id="mission-budget">10</span></div>
     <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
   </div>
 
@@ -380,9 +450,8 @@
     <canvas id="board" width="512" height="512"></canvas>
     <div id="overlay-banner">
       <h2 id="banner-text">VICTORY</h2>
-      <div id="banner-stage-ladder"></div>
       <div id="banner-sub" style="font-size:11px; color:#c9d6a3; margin-bottom:14px;"></div>
-      <button class="primary" id="banner-restart" style="max-width:160px;">RESTART</button>
+      <button class="primary" id="banner-restart" style="max-width:160px;">RETURN TO BASE</button>
     </div>
   </div>
 
@@ -459,6 +528,21 @@
 
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
 
+  const MAP_NODES = [
+    { id: 'domino_city', name: 'Domino City', budget: 10, x: 15, y: 82 },
+    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 13, x: 35, y: 55 },
+    { id: 'battle_city', name: 'Battle City', budget: 16, x: 55, y: 78 },
+    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 19, x: 75, y: 42 },
+    { id: 'shadow_realm', name: 'Shadow Realm', budget: 22, x: 88, y: 18 },
+  ];
+
+  const MAP_PATHS = [
+    ['domino_city', 'duelist_kingdom'],
+    ['duelist_kingdom', 'battle_city'],
+    ['battle_city', 'waking_the_dragons'],
+    ['waking_the_dragons', 'shadow_realm'],
+  ];
+
   function spritePath(unitId) {
     return 'assets/sprites/' + unitId + '.jpg';
   }
@@ -483,10 +567,15 @@
   const bannerTextEl = document.getElementById('banner-text');
   const bannerSubEl = document.getElementById('banner-sub');
   const bannerRestartBtn = document.getElementById('banner-restart');
-  const bannerStageLadderEl = document.getElementById('banner-stage-ladder');
   const legendRowsEl = document.getElementById('legend-rows');
+  const homeScreenEl = document.getElementById('home-screen');
+  const mapScreenEl = document.getElementById('map-screen');
   const draftScreenEl = document.getElementById('draft-screen');
   const gameContainerEl = document.querySelector('.game-container');
+  const deployBtn = document.getElementById('deploy-btn');
+  const mapBackBtn = document.getElementById('map-back-btn');
+  const mapCanvasEl = document.getElementById('map-canvas');
+  const mapPathsEl = document.getElementById('map-paths');
   const turnPanelEl = document.getElementById('turn-panel');
   const battleLogPanelEl = document.getElementById('battle-log-panel');
   const battleBtnRowEl = document.getElementById('battle-btn-row');
@@ -504,9 +593,7 @@
   let gameOver = false;
   let aiRunning = false;
 
-  let stage = 1;
-  const TOTAL_STAGES = 5;
-  let bannerAdvances = false;
+  let currentNode = null;
 
   let selectedUnit = null;
   let reachableTiles = [];
@@ -736,42 +823,22 @@
     return false;
   }
 
-  function renderStageLadder(containerEl) {
-    let html = '';
-    for (let i = 1; i <= TOTAL_STAGES; i++) {
-      let cls = 'stage-node';
-      if (i < stage) cls += ' cleared';
-      else if (i === stage) cls += ' current';
-      html += '<div class="' + cls + '"></div>';
-    }
-    containerEl.innerHTML = html;
-  }
-
   function endGame(victory) {
     gameOver = true;
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
 
-    bannerAdvances = victory && stage < TOTAL_STAGES;
-
     bannerEl.classList.add('show');
     bannerEl.classList.toggle('victory', victory);
     bannerEl.classList.toggle('defeat', !victory);
-    renderStageLadder(bannerStageLadderEl);
 
-    if (victory && stage < TOTAL_STAGES) {
-      bannerTextEl.textContent = 'STAGE ' + stage + ' CLEARED';
-      bannerSubEl.textContent = 'Advance to stage ' + (stage + 1) + '.';
-      bannerRestartBtn.textContent = 'CONTINUE';
-    } else if (victory) {
-      bannerTextEl.textContent = 'RUN COMPLETE';
-      bannerSubEl.textContent = 'All ' + TOTAL_STAGES + ' stages cleared!';
-      bannerRestartBtn.textContent = 'NEW RUN';
+    if (victory) {
+      bannerTextEl.textContent = 'VICTORY';
+      bannerSubEl.textContent = currentNode.name + ' secured.';
     } else {
       bannerTextEl.textContent = 'DEFEAT';
-      bannerSubEl.textContent = 'Your squad has fallen at stage ' + stage + '.';
-      bannerRestartBtn.textContent = 'NEW RUN';
+      bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
     }
 
     endTurnBtn.disabled = true;
@@ -1155,11 +1222,17 @@
   });
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
-  restartBtn.addEventListener('click', resetToDraftScreen);
-  bannerRestartBtn.addEventListener('click', () => {
-    if (bannerAdvances) advanceStage();
-    else resetToDraftScreen();
-  });
+  restartBtn.addEventListener('click', returnToHomeBase);
+  bannerRestartBtn.addEventListener('click', returnToHomeBase);
+
+  // ---------- Screens ----------
+
+  function showScreen(name) {
+    homeScreenEl.classList.toggle('hidden', name !== 'home');
+    mapScreenEl.classList.toggle('hidden', name !== 'map');
+    draftScreenEl.classList.toggle('hidden', name !== 'draft');
+    gameContainerEl.classList.toggle('hidden', name !== 'battle');
+  }
 
   function resetBattleAndDraftState() {
     phase = 'draft';
@@ -1173,7 +1246,6 @@
     reachableTiles = [];
     attackableTargets = [];
     hoveredTile = null;
-    bannerAdvances = false;
     battleLogEl.innerHTML = '';
     bannerEl.classList.remove('show', 'victory', 'defeat');
     endTurnBtn.disabled = false;
@@ -1183,24 +1255,53 @@
     pendingPlayerUnits = [];
     selectedPlacementUnitId = null;
 
-    gameContainerEl.classList.add('hidden');
-    draftScreenEl.classList.remove('hidden');
     pickerPanelEl.style.display = 'block';
     confirmTeamBtn.style.display = 'block';
     resultsPanelEl.style.display = 'none';
-    renderStageIndicator();
+  }
+
+  function returnToHomeBase() {
+    resetBattleAndDraftState();
+    currentNode = null;
+    showScreen('home');
+  }
+
+  function enterDraftForNode(node) {
+    resetBattleAndDraftState();
+    currentNode = node;
+    showScreen('draft');
+    renderMissionIndicator();
     renderUnitGrid();
   }
 
-  function resetToDraftScreen() {
-    stage = 1;
-    resetBattleAndDraftState();
+  function renderMap() {
+    mapCanvasEl.querySelectorAll('.map-node').forEach(el => el.remove());
+
+    mapPathsEl.innerHTML = MAP_PATHS.map(([fromId, toId]) => {
+      const from = MAP_NODES.find(n => n.id === fromId);
+      const to = MAP_NODES.find(n => n.id === toId);
+      return '<line x1="' + from.x + '%" y1="' + from.y + '%" x2="' + to.x + '%" y2="' + to.y + '%"></line>';
+    }).join('');
+
+    MAP_NODES.forEach(node => {
+      const el = document.createElement('div');
+      el.className = 'map-node';
+      el.style.left = node.x + '%';
+      el.style.top = node.y + '%';
+      el.innerHTML =
+        '<div class="map-node-name">' + node.name + '</div>' +
+        '<div class="map-node-budget">BUDGET ' + node.budget + '</div>';
+      el.addEventListener('click', () => enterDraftForNode(node));
+      mapCanvasEl.appendChild(el);
+    });
   }
 
-  function advanceStage() {
-    stage += 1;
-    resetBattleAndDraftState();
-  }
+  deployBtn.addEventListener('click', () => {
+    renderMap();
+    showScreen('map');
+  });
+
+  mapBackBtn.addEventListener('click', () => showScreen('home'));
 
   // ---------- Draft ----------
 
@@ -1215,8 +1316,8 @@
   const resultsPanelEl = document.getElementById('results-panel');
   const resultsContentEl = document.getElementById('results-content');
   const redraftBtn = document.getElementById('redraft-btn');
-  const stageCurrentEl = document.getElementById('stage-current');
-  const stageTotalEl = document.getElementById('stage-total');
+  const missionNameEl = document.getElementById('mission-name');
+  const missionBudgetEl = document.getElementById('mission-budget');
 
   function playerSpent() {
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
@@ -1236,13 +1337,9 @@
     return team;
   }
 
-  function aiBudgetForStage(stageNum) {
-    return DRAFT_BUDGET + (stageNum - 1) * 3;
-  }
-
-  function renderStageIndicator() {
-    stageCurrentEl.textContent = stage;
-    stageTotalEl.textContent = TOTAL_STAGES;
+  function renderMissionIndicator() {
+    missionNameEl.textContent = currentNode.name;
+    missionBudgetEl.textContent = currentNode.budget;
   }
 
   function renderUnitGrid() {
@@ -1304,10 +1401,10 @@
   }
 
   confirmTeamBtn.addEventListener('click', () => {
-    confirmedAiTeam = draftAITeam(aiBudgetForStage(stage));
+    confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
       rosterHtml('YOUR TEAM', selectedPlayerUnits, DRAFT_BUDGET) +
-      rosterHtml('ENEMY TEAM (STAGE ' + stage + ')', confirmedAiTeam, aiBudgetForStage(stage));
+      rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
     resultsPanelEl.style.display = 'block';
@@ -1321,9 +1418,6 @@
     resultsPanelEl.style.display = 'none';
     renderUnitGrid();
   });
-
-  renderStageIndicator();
-  renderUnitGrid();
 
   // ---------- Placement ----------
 
@@ -1379,8 +1473,7 @@
     placeAITeam(confirmedAiTeam);
     renderLegend();
 
-    draftScreenEl.classList.add('hidden');
-    gameContainerEl.classList.remove('hidden');
+    showScreen('battle');
 
     turnPanelEl.style.display = 'none';
     battleLogPanelEl.style.display = 'none';
