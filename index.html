@@ -400,6 +400,7 @@
   <h1 class="title">HOME BASE</h1>
   <div class="panel">
     <div class="subtitle">Your squad is rested and ready. Choose a mission from the map to deploy.</div>
+    <div id="star-chips-display" class="subtitle">STAR CHIPS: <span id="star-chips-count">0</span></div>
   </div>
   <div class="btn-row">
     <button id="deploy-btn" class="primary">DEPLOY</button>
@@ -836,6 +837,8 @@
     if (victory) {
       bannerTextEl.textContent = 'VICTORY';
       bannerSubEl.textContent = currentNode.name + ' secured.';
+      starChips += currentNode.budget;
+      bannerSubEl.textContent += ' +' + currentNode.budget + ' Star Chips earned.';
     } else {
       bannerTextEl.textContent = 'DEFEAT';
       bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
@@ -1269,11 +1272,16 @@
     resultsPanelEl.style.display = 'none';
   }
 
+  function renderHomeScreen() {
+    document.getElementById('star-chips-count').textContent = starChips;
+  }
+
   function returnToHomeBase() {
     pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
     showScreen('home');
+    renderHomeScreen();
   }
 
   function enterDraftForNode(node) {
@@ -1344,6 +1352,7 @@
 
   let activeRoster = [];
   let bench = [];
+  let starChips = 0;
 
   // Unit death is permanent: any player-team battlefield unit still marked dead when the
   // battle screen is left (win, loss, or mid-fight retreat) is stripped from the owned
@@ -1639,6 +1648,8 @@
   }
 
   beginBattleBtn.addEventListener('click', beginBattle);
+
+  renderHomeScreen();
 })();
 </script>
 </body>
