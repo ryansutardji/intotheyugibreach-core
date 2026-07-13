@@ -1,0 +1,4 @@
+- generic [ref=f5e2]:
+  - heading "HOME BASE" [level=1] [ref=f5e3]
+  - generic [ref=f5e4]: Your squad is rested and ready. Choose a mission from the map to deploy.
+  - button "DEPLOY" [ref=f5e7] [cursor=pointer]

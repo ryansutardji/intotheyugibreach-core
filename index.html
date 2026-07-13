@@ -427,7 +427,7 @@
   </div>
 
   <div class="panel" id="picker-panel">
-    <h3>AVAILABLE UNITS — CLICK TO DRAFT</h3>
+    <h3>DRAFT YOUR ROSTER — CLICK TO DRAFT</h3>
     <div class="unit-grid" id="unit-grid"></div>
   </div>
 
@@ -1271,7 +1271,20 @@
     currentNode = node;
     showScreen('draft');
     renderMissionIndicator();
-    renderUnitGrid();
+
+    if (activeRoster.length === 0) {
+      // No permanent squad yet — this is the one-time draft that builds it.
+      redraftBtn.style.display = '';
+      budgetMeterEl.style.display = '';
+      renderUnitGrid();
+    } else {
+      // Squad already exists — never ask the player to draft again. Field the
+      // whole roster automatically and go straight to the enemy-preview screen.
+      selectedPlayerUnits = activeRoster.map(entry => entry.unitId);
+      redraftBtn.style.display = 'none';
+      budgetMeterEl.style.display = 'none';
+      confirmTeam();
+    }
   }
 
   function renderMap() {
@@ -1303,6 +1316,25 @@
 
   mapBackBtn.addEventListener('click', () => showScreen('home'));
 
+  // ---------- Persistent Roster ----------
+  // Owned across the whole run: persists across encounters (win or lose), and is
+  // drafted exactly once — every subsequent deploy fields the same roster with no
+  // redraft. There's no localStorage in this codebase, so "persistence" means
+  // "survives repeated encounters," not "survives a page reload" — a fresh page
+  // load is a fresh run. Bootstrap: both start empty; the roster is populated the
+  // first time the player confirms a squad (see enterPlacementPhase). Bench stays
+  // empty until a recruit system exists to put anything there. Each entry carries
+  // a stable rosterId so later features (permadeath, per-instance leveling) can
+  // identify one specific owned unit without another data-model rewrite.
+
+  let nextRosterId = 1;
+  function makeRosterEntry(unitId) {
+    return { rosterId: nextRosterId++, unitId };
+  }
+
+  let activeRoster = [];
+  let bench = [];
+
   // ---------- Draft ----------
 
   const DRAFT_BUDGET = 10;
@@ -1310,6 +1342,7 @@
   let confirmedAiTeam = [];
 
   const unitGridEl = document.getElementById('unit-grid');
+  const budgetMeterEl = document.getElementById('budget-meter');
   const budgetRemainingEl = document.getElementById('budget-remaining');
   const confirmTeamBtn = document.getElementById('confirm-team-btn');
   const pickerPanelEl = document.getElementById('picker-panel');
@@ -1400,7 +1433,7 @@
     );
   }
 
-  confirmTeamBtn.addEventListener('click', () => {
+  function confirmTeam() {
     confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
       rosterHtml('YOUR TEAM', selectedPlayerUnits, DRAFT_BUDGET) +
@@ -1408,7 +1441,9 @@
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
     resultsPanelEl.style.display = 'block';
-  });
+  }
+
+  confirmTeamBtn.addEventListener('click', confirmTeam);
 
   startBattleBtn.addEventListener('click', enterPlacementPhase);
 
@@ -1460,6 +1495,10 @@
   }
 
   function enterPlacementPhase() {
+    if (activeRoster.length === 0) {
+      activeRoster = selectedPlayerUnits.map(makeRosterEntry);
+    }
+
     phase = 'placement';
     units = [];
     nextId = 1;

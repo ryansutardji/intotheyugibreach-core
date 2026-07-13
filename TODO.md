@@ -6,17 +6,17 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 
 ## Straw-man plan (agreed direction, v2)
 
-- [ ] **Run structure — home base + map, not a ladder.** Overhauls the old flat 5-stage
+- [x] **Run structure — home base + map, not a ladder.** Overhauls the old flat 5-stage
       ladder. Player has a persistent home base. From home base, the player picks which
       node on a map to deploy to (not a strictly linear stage 1→2→3 progression) — think
       choosing a mission rather than climbing a ladder. After an encounter (win or lose),
       the player returns to home base before deploying again.
 - [ ] **Difficulty scaling — per-node budget, not per-stage formula.** Replaces the old
-      `aiBudgetForStage(stageNum) = DRAFT_BUDGET + (stageNum - 1) * 3` formula. Each node
+      `aiBudgetForStage(stageNum) = DRAFT_BUDGET + (stageNum - 1) * 2` formula. Each node
       on the map has its own AI draft budget baked into that node (harder/farther nodes =
       bigger AI budget), rather than difficulty being purely a function of how many
       stages you've cleared in sequence.
-- [ ] **Squad persistence — active roster + bench, not a full redraft.** Player owns a
+- [x] **Squad persistence — active roster + bench, not a full redraft.** Player owns a
       pool of units across the whole run: some on the **active roster** (deployable,
       counts against the draft budget cap) and some on the **bench** (owned, but not
       currently fielded). Before each encounter, the player drafts their active squad
