@@ -1,0 +1,25 @@
+- generic [ref=e1015]:
+  - heading "TACTICS SKIRMISH" [level=1] [ref=e1016]
+  - generic [ref=e1017]:
+    - heading "UNIT INFO" [level=3] [ref=e1018]
+    - generic [ref=e1019]: Click one of your units to select it.
+  - generic [ref=e1021]:
+    - heading "DEPLOY YOUR UNITS" [level=3] [ref=e1022]
+    - generic [ref=e2413] [cursor=pointer]:
+      - generic [ref=e2414]:
+        - generic [ref=e2415]: Blue-Eyes White Dragon
+        - generic [ref=e2416]: "8"
+      - generic [ref=e2417]: Dragon / LIGHT
+      - generic [ref=e2418]: Deals 30% bonus damage to targets not at full HP, but takes double damage from Spellcaster-type attackers.
+    - generic [ref=e1048]: Click a unit above, then click a highlighted tile on your side of the board. Click a placed unit to pick it back up.
+    - generic [ref=e1049]:
+      - button "AUTO-PLACE" [ref=e1050] [cursor=pointer]
+      - button "BEGIN BATTLE" [disabled] [ref=e1051]
+  - generic [ref=e1052]:
+    - heading "LEGEND" [level=3] [ref=e1053]
+    - generic [ref=e1054]:
+      - generic [ref=e2419]: Blue-Eyes White Dragon — Dragon, range 1
+      - generic [ref=e2420]: Summoned Skull — Fiend, range 1
+      - generic [ref=e2421]: Celtic Guardian — Warrior, range 1
+    - generic [ref=e1059]: Outline = team (blue outline = you, red outline = enemy).
+    - generic [ref=e1060]: Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.

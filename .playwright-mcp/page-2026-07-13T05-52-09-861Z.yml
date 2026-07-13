@@ -1,0 +1,28 @@
+- generic [ref=e34]:
+  - heading "DRAFT YOUR TEAM" [level=1] [ref=e35]
+  - generic [ref=e36]:
+    - generic [ref=e37]: "MISSION: Domino City — BUDGET 10"
+    - generic [ref=e38]: "BUDGET: 2 / 10 REMAINING"
+  - generic [ref=e980]:
+    - heading "DRAFT RESULTS" [level=3] [ref=e981]
+    - generic [ref=e982]:
+      - generic [ref=e2393]: YOUR TEAM
+      - generic [ref=e2394]:
+        - generic [ref=e2395]: Blue-Eyes White Dragon
+        - generic [ref=e2396]: "8"
+      - generic [ref=e2397]:
+        - generic [ref=e2398]: TOTAL
+        - generic [ref=e2399]: 8 / 10
+      - generic [ref=e2400]: ENEMY TEAM (Domino City)
+      - generic [ref=e2401]:
+        - generic [ref=e2402]: Summoned Skull
+        - generic [ref=e2403]: "6"
+      - generic [ref=e2404]:
+        - generic [ref=e2405]: Celtic Guardian
+        - generic [ref=e2406]: "4"
+      - generic [ref=e2407]:
+        - generic [ref=e2408]: TOTAL
+        - generic [ref=e2409]: 10 / 10
+    - generic [ref=e1009]:
+      - button "REDRAFT" [ref=e1010] [cursor=pointer]
+      - button "DEPLOY TROOPS" [ref=e1011] [cursor=pointer]

@@ -485,7 +485,7 @@
 
     <div class="btn-row" id="battle-btn-row">
       <button id="end-turn-btn" class="primary">END TURN</button>
-      <button id="restart-btn">RESTART</button>
+      <button id="restart-btn">RETREAT</button>
     </div>
 
     <div class="panel legend">
@@ -603,10 +603,10 @@
   let playerDeaths = 0;
   let enemyDeaths = 0;
 
-  function makeUnit(team, unitId, x, y) {
+  function makeUnit(team, unitId, x, y, rosterId = null) {
     const t = UNIT_DATABASE[unitId];
     return {
-      id: nextId++, team, unitId, x, y,
+      id: nextId++, team, unitId, rosterId, x, y,
       name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
       hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
       alive: true, hasMoved: false, turnDone: false,
@@ -839,6 +839,11 @@
     } else {
       bannerTextEl.textContent = 'DEFEAT';
       bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
+    }
+
+    const lostNames = units.filter(u => u.team === 'player' && !u.alive).map(u => u.name);
+    if (lostNames.length) {
+      bannerSubEl.textContent += ' Lost forever: ' + lostNames.join(', ') + '.';
     }
 
     endTurnBtn.disabled = true;
@@ -1222,7 +1227,11 @@
   });
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
-  restartBtn.addEventListener('click', returnToHomeBase);
+  restartBtn.addEventListener('click', () => {
+    if (window.confirm('Retreat? Units already downed will be lost permanently.')) {
+      returnToHomeBase();
+    }
+  });
   bannerRestartBtn.addEventListener('click', returnToHomeBase);
 
   // ---------- Screens ----------
@@ -1253,7 +1262,7 @@
     selectedPlayerUnits = [];
     confirmedAiTeam = [];
     pendingPlayerUnits = [];
-    selectedPlacementUnitId = null;
+    selectedPlacementRosterId = null;
 
     pickerPanelEl.style.display = 'block';
     confirmTeamBtn.style.display = 'block';
@@ -1261,6 +1270,7 @@
   }
 
   function returnToHomeBase() {
+    pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
     showScreen('home');
@@ -1334,6 +1344,19 @@
 
   let activeRoster = [];
   let bench = [];
+
+  // Unit death is permanent: any player-team battlefield unit still marked dead when the
+  // battle screen is left (win, loss, or mid-fight retreat) is stripped from the owned
+  // pools for good — it doesn't come back on the bench, healed or otherwise.
+  function pruneDeadRosterEntries() {
+    const deadIds = new Set(
+      units.filter(u => u.team === 'player' && !u.alive && u.rosterId != null)
+           .map(u => u.rosterId)
+    );
+    if (deadIds.size === 0) return;
+    activeRoster = activeRoster.filter(e => !deadIds.has(e.rosterId));
+    bench = bench.filter(e => !deadIds.has(e.rosterId));
+  }
 
   // ---------- Draft ----------
 
@@ -1462,7 +1485,7 @@
   const SPREAD_ROWS = [3, 4, 2, 5, 1, 6, 0, 7];
 
   let pendingPlayerUnits = [];
-  let selectedPlacementUnitId = null;
+  let selectedPlacementRosterId = null;
 
   function placeAITeam(aiTeamIds) {
     const front = aiTeamIds.filter(id => UNIT_DATABASE[id].range === 1);
@@ -1502,8 +1525,8 @@
     phase = 'placement';
     units = [];
     nextId = 1;
-    pendingPlayerUnits = [...selectedPlayerUnits];
-    selectedPlacementUnitId = null;
+    pendingPlayerUnits = activeRoster.map(entry => entry.rosterId);
+    selectedPlacementRosterId = null;
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
@@ -1524,13 +1547,14 @@
   }
 
   function renderPlacementRoster() {
-    placementRosterEl.innerHTML = pendingPlayerUnits.map(id => {
-      const u = UNIT_DATABASE[id];
-      const isSelected = id === selectedPlacementUnitId;
+    placementRosterEl.innerHTML = pendingPlayerUnits.map(rid => {
+      const entry = activeRoster.find(e => e.rosterId === rid);
+      const u = UNIT_DATABASE[entry.unitId];
+      const isSelected = rid === selectedPlacementRosterId;
       return (
-        '<div class="unit-card' + (isSelected ? ' selected' : '') + '" data-unit-id="' + id + '">' +
+        '<div class="unit-card' + (isSelected ? ' selected' : '') + '" data-roster-id="' + rid + '">' +
           '<div class="unit-card-inner">' +
-            '<img class="unit-card-thumb" src="' + spritePath(id) + '" alt="">' +
+            '<img class="unit-card-thumb" src="' + spritePath(entry.unitId) + '" alt="">' +
             '<div class="unit-card-body">' +
               '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
               '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
@@ -1546,8 +1570,8 @@
   placementRosterEl.addEventListener('click', (e) => {
     const card = e.target.closest('.unit-card');
     if (!card) return;
-    const id = card.dataset.unitId;
-    selectedPlacementUnitId = (selectedPlacementUnitId === id) ? null : id;
+    const rid = Number(card.dataset.rosterId);
+    selectedPlacementRosterId = (selectedPlacementRosterId === rid) ? null : rid;
     renderPlacementRoster();
   });
 
@@ -1556,24 +1580,26 @@
 
     if (occupant && occupant.team === 'player') {
       units = units.filter(u => u !== occupant);
-      pendingPlayerUnits.push(occupant.unitId);
-      selectedPlacementUnitId = null;
+      pendingPlayerUnits.push(occupant.rosterId);
+      selectedPlacementRosterId = null;
       renderPlacementRoster();
       render();
       return;
     }
 
-    if (!occupant && selectedPlacementUnitId && PLAYER_ZONE_X.includes(tx)) {
-      units.push(makeUnit('player', selectedPlacementUnitId, tx, ty));
-      pendingPlayerUnits = pendingPlayerUnits.filter(id => id !== selectedPlacementUnitId);
-      selectedPlacementUnitId = null;
+    if (!occupant && selectedPlacementRosterId != null && PLAYER_ZONE_X.includes(tx)) {
+      const entry = activeRoster.find(e => e.rosterId === selectedPlacementRosterId);
+      units.push(makeUnit('player', entry.unitId, tx, ty, entry.rosterId));
+      pendingPlayerUnits = pendingPlayerUnits.filter(rid => rid !== selectedPlacementRosterId);
+      selectedPlacementRosterId = null;
       renderPlacementRoster();
       render();
     }
   }
 
   function autoPlacePlayer() {
-    pendingPlayerUnits.slice().forEach(id => {
+    pendingPlayerUnits.slice().forEach(rid => {
+      const entry = activeRoster.find(e => e.rosterId === rid);
       const empty = [];
       for (const x of PLAYER_ZONE_X) {
         for (let y = 0; y < GRID; y++) {
@@ -1582,10 +1608,10 @@
       }
       if (empty.length === 0) return;
       const tile = empty[Math.floor(Math.random() * empty.length)];
-      units.push(makeUnit('player', id, tile.x, tile.y));
-      pendingPlayerUnits = pendingPlayerUnits.filter(pid => pid !== id);
+      units.push(makeUnit('player', entry.unitId, tile.x, tile.y, entry.rosterId));
+      pendingPlayerUnits = pendingPlayerUnits.filter(pid => pid !== rid);
     });
-    selectedPlacementUnitId = null;
+    selectedPlacementRosterId = null;
     renderPlacementRoster();
     render();
   }

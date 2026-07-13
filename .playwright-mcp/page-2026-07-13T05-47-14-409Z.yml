@@ -1,0 +1,39 @@
+- generic [ref=e1015]:
+  - heading "TACTICS SKIRMISH" [level=1] [ref=e1016]
+  - generic [ref=e1017]:
+    - heading "UNIT INFO" [level=3] [ref=e1018]
+    - generic [ref=e1019]: Click one of your units to select it.
+  - generic [ref=e1021]:
+    - heading "DEPLOY YOUR UNITS" [level=3] [ref=e1022]
+    - generic [ref=e1023]:
+      - generic [ref=e1026] [cursor=pointer]:
+        - generic [ref=e1027]:
+          - generic [ref=e1028]: Kuriboh
+          - generic [ref=e1029]: "1"
+        - generic [ref=e1030]: Fiend / DARK
+        - generic [ref=e1031]: The first attack that would ever damage this unit is negated instead.
+      - generic [ref=e1034] [cursor=pointer]:
+        - generic [ref=e1035]:
+          - generic [ref=e1036]: Man-Eater Bug
+          - generic [ref=e1037]: "2"
+        - generic [ref=e1038]: Insect / EARTH
+        - generic [ref=e1039]: When destroyed, deals damage equal to its max HP to whoever destroyed it.
+      - generic [ref=e1042] [cursor=pointer]:
+        - generic [ref=e1043]:
+          - generic [ref=e1044]: Giant Soldier of Stone
+          - generic [ref=e1045]: "3"
+        - generic [ref=e1046]: Rock / EARTH
+        - generic [ref=e1047]: Adjacent allies take 25% less damage.
+    - generic [ref=e1048]: Click a unit above, then click a highlighted tile on your side of the board. Click a placed unit to pick it back up.
+    - generic [ref=e1049]:
+      - button "AUTO-PLACE" [ref=e1050] [cursor=pointer]
+      - button "BEGIN BATTLE" [disabled] [ref=e1051]
+  - generic [ref=e1052]:
+    - heading "LEGEND" [level=3] [ref=e1053]
+    - generic [ref=e1054]:
+      - generic [ref=e1055]: Kuriboh — Fiend, range 1
+      - generic [ref=e1056]: Man-Eater Bug — Insect, range 1
+      - generic [ref=e1057]: Giant Soldier of Stone — Rock, range 1
+      - generic [ref=e1058]: Summoned Skull — Fiend, range 1
+    - generic [ref=e1059]: Outline = team (blue outline = you, red outline = enemy).
+    - generic [ref=e1060]: Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.

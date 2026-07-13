@@ -1,0 +1,30 @@
+- generic [ref=e34]:
+  - heading "DRAFT YOUR TEAM" [level=1] [ref=e35]
+  - generic [ref=e36]: "MISSION: Battle City — BUDGET 16"
+  - generic [ref=e980]:
+    - heading "DRAFT RESULTS" [level=3] [ref=e981]
+    - generic [ref=e982]:
+      - generic [ref=e2494]: YOUR TEAM
+      - generic [ref=e2495]:
+        - generic [ref=e2496]: Blue-Eyes White Dragon
+        - generic [ref=e2497]: "8"
+      - generic [ref=e2498]:
+        - generic [ref=e2499]: TOTAL
+        - generic [ref=e2500]: 8 / 10
+      - generic [ref=e2501]: ENEMY TEAM (Battle City)
+      - generic [ref=e2502]:
+        - generic [ref=e2503]: Man-Eater Bug
+        - generic [ref=e2504]: "2"
+      - generic [ref=e2505]:
+        - generic [ref=e2506]: Summoned Skull
+        - generic [ref=e2507]: "6"
+      - generic [ref=e2508]:
+        - generic [ref=e2509]: Gaia the Fierce Knight
+        - generic [ref=e2510]: "7"
+      - generic [ref=e2511]:
+        - generic [ref=e2512]: Kuriboh
+        - generic [ref=e2513]: "1"
+      - generic [ref=e2514]:
+        - generic [ref=e2515]: TOTAL
+        - generic [ref=e2516]: 16 / 16
+    - button "DEPLOY TROOPS" [ref=e1011] [cursor=pointer]

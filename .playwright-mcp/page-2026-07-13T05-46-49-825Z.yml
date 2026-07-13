@@ -1,0 +1,207 @@
+- generic [ref=e34]:
+  - heading "DRAFT YOUR TEAM" [level=1] [ref=e35]
+  - generic [ref=e36]:
+    - generic [ref=e37]: "MISSION: Domino City — BUDGET 10"
+    - generic [ref=e38]: "BUDGET: 7 / 10 REMAINING"
+  - generic [ref=e39]:
+    - heading "DRAFT YOUR ROSTER — CLICK TO DRAFT" [level=3] [ref=e40]
+    - generic [ref=e41]:
+      - generic [ref=e514] [cursor=pointer]:
+        - generic [ref=e515]:
+          - generic [ref=e516]: Baby Dragon
+          - generic [ref=e517]: "3"
+        - generic [ref=e518]: Dragon / WIND
+        - generic [ref=e519]:
+          - generic [ref=e520]: HP 40
+          - generic [ref=e521]: ATK 13
+          - generic [ref=e522]: MOV 4
+          - generic [ref=e523]: RNG 1
+        - generic [ref=e524]: Gains +3 ATK permanently for each enemy it destroys.
+      - generic [ref=e527] [cursor=pointer]:
+        - generic [ref=e528]:
+          - generic [ref=e529]: Beaver Warrior
+          - generic [ref=e530]: "4"
+        - generic [ref=e531]: Beast-Warrior / EARTH
+        - generic [ref=e532]:
+          - generic [ref=e533]: HP 70
+          - generic [ref=e534]: ATK 12
+          - generic [ref=e535]: MOV 2
+          - generic [ref=e536]: RNG 1
+        - generic [ref=e537]: Takes 30% less damage on turns it doesn't move.
+      - generic [ref=e540]:
+        - generic [ref=e541]:
+          - generic [ref=e542]: Blue-Eyes White Dragon
+          - generic [ref=e543]: "8"
+        - generic [ref=e544]: Dragon / LIGHT
+        - generic [ref=e545]:
+          - generic [ref=e546]: HP 85
+          - generic [ref=e547]: ATK 30
+          - generic [ref=e548]: MOV 3
+          - generic [ref=e549]: RNG 1
+        - generic [ref=e550]: Deals 30% bonus damage to targets not at full HP, but takes double damage from Spellcaster-type attackers.
+      - generic [ref=e553] [cursor=pointer]:
+        - generic [ref=e554]:
+          - generic [ref=e555]: Celtic Guardian
+          - generic [ref=e556]: "4"
+        - generic [ref=e557]: Warrior / EARTH
+        - generic [ref=e558]:
+          - generic [ref=e559]: HP 58
+          - generic [ref=e560]: ATK 16
+          - generic [ref=e561]: MOV 3
+          - generic [ref=e562]: RNG 1
+        - generic [ref=e563]: If it survives being attacked by an adjacent enemy, strikes back for 50% of its ATK.
+      - generic [ref=e566] [cursor=pointer]:
+        - generic [ref=e567]:
+          - generic [ref=e568]: Curse of Dragon
+          - generic [ref=e569]: "5"
+        - generic [ref=e570]: Dragon / DARK
+        - generic [ref=e571]:
+          - generic [ref=e572]: HP 52
+          - generic [ref=e573]: ATK 23
+          - generic [ref=e574]: MOV 3
+          - generic [ref=e575]: RNG 1
+        - generic [ref=e576]: Can move through occupied tiles (must still land on an empty one).
+      - generic [ref=e579] [cursor=pointer]:
+        - generic [ref=e580]:
+          - generic [ref=e581]: Dark Magician
+          - generic [ref=e582]: "7"
+        - generic [ref=e583]: Spellcaster / DARK
+        - generic [ref=e584]:
+          - generic [ref=e585]: HP 55
+          - generic [ref=e586]: ATK 26
+          - generic [ref=e587]: MOV 3
+          - generic [ref=e588]: RNG 3
+        - generic [ref=e589]: Attacks hit every enemy sharing its row or column within range, not just one target.
+      - generic [ref=e592] [cursor=pointer]:
+        - generic [ref=e593]:
+          - generic [ref=e594]: Dark Magician Girl
+          - generic [ref=e595]: "6"
+        - generic [ref=e596]: Spellcaster / DARK
+        - generic [ref=e597]:
+          - generic [ref=e598]: HP 48
+          - generic [ref=e599]: ATK 22
+          - generic [ref=e600]: MOV 3
+          - generic [ref=e601]: RNG 2
+        - generic [ref=e602]: Gains +2 ATK for every allied unit destroyed so far this battle.
+      - generic [ref=e605] [cursor=pointer]:
+        - generic [ref=e606]:
+          - generic [ref=e607]: Feral Imp
+          - generic [ref=e608]: "4"
+        - generic [ref=e609]: Fiend / DARK
+        - generic [ref=e610]:
+          - generic [ref=e611]: HP 56
+          - generic [ref=e612]: ATK 17
+          - generic [ref=e613]: MOV 3
+          - generic [ref=e614]: RNG 1
+        - generic [ref=e615]: Deals 40% bonus damage to targets below half HP.
+      - generic [ref=e618] [cursor=pointer]:
+        - generic [ref=e619]:
+          - generic [ref=e620]: Flame Swordsman
+          - generic [ref=e621]: "5"
+        - generic [ref=e622]: Warrior / FIRE
+        - generic [ref=e623]:
+          - generic [ref=e624]: HP 62
+          - generic [ref=e625]: ATK 20
+          - generic [ref=e626]: MOV 3
+          - generic [ref=e627]: RNG 1
+        - generic [ref=e628]: On kill, deals splash damage (50% ATK) to enemies adjacent to the target.
+      - generic [ref=e631] [cursor=pointer]:
+        - generic [ref=e632]:
+          - generic [ref=e633]: Gaia the Fierce Knight
+          - generic [ref=e634]: "7"
+        - generic [ref=e635]: Warrior / EARTH
+        - generic [ref=e636]:
+          - generic [ref=e637]: HP 100
+          - generic [ref=e638]: ATK 24
+          - generic [ref=e639]: MOV 3
+          - generic [ref=e640]: RNG 1
+        - generic [ref=e641]: Deals 25% bonus damage on turns it moved before attacking.
+      - generic [ref=e644] [cursor=pointer]:
+        - generic [ref=e645]:
+          - generic [ref=e646]: Gemini Elf
+          - generic [ref=e647]: "4"
+        - generic [ref=e648]: Spellcaster / EARTH
+        - generic [ref=e649]:
+          - generic [ref=e650]: HP 44
+          - generic [ref=e651]: ATK 19
+          - generic [ref=e652]: MOV 3
+          - generic [ref=e653]: RNG 2
+        - generic [ref=e654]: Can attack twice per turn.
+      - generic [ref=e657] [cursor=pointer]:
+        - generic [ref=e658]:
+          - generic [ref=e659]: Giant Soldier of Stone
+          - generic [ref=e660]: "3"
+        - generic [ref=e661]: Rock / EARTH
+        - generic [ref=e662]:
+          - generic [ref=e663]: HP 70
+          - generic [ref=e664]: ATK 11
+          - generic [ref=e665]: MOV 2
+          - generic [ref=e666]: RNG 1
+        - generic [ref=e667]: Adjacent allies take 25% less damage.
+      - generic [ref=e670] [cursor=pointer]:
+        - generic [ref=e671]:
+          - generic [ref=e672]: Kaiser Sea Horse
+          - generic [ref=e673]: "4"
+        - generic [ref=e674]: Sea Serpent / LIGHT
+        - generic [ref=e675]:
+          - generic [ref=e676]: HP 66
+          - generic [ref=e677]: ATK 15
+          - generic [ref=e678]: MOV 2
+          - generic [ref=e679]: RNG 1
+        - generic [ref=e680]: Gains +6 ATK while adjacent to Blue-Eyes White Dragon (and grants the same to it).
+      - generic [ref=e683] [cursor=pointer]:
+        - generic [ref=e684]:
+          - generic [ref=e685]: Kuriboh
+          - generic [ref=e686]: "1"
+        - generic [ref=e687]: Fiend / DARK
+        - generic [ref=e688]:
+          - generic [ref=e689]: HP 20
+          - generic [ref=e690]: ATK 6
+          - generic [ref=e691]: MOV 4
+          - generic [ref=e692]: RNG 1
+        - generic [ref=e693]: The first attack that would ever damage this unit is negated instead.
+      - generic [ref=e696] [cursor=pointer]:
+        - generic [ref=e697]:
+          - generic [ref=e698]: Man-Eater Bug
+          - generic [ref=e699]: "2"
+        - generic [ref=e700]: Insect / EARTH
+        - generic [ref=e701]:
+          - generic [ref=e702]: HP 28
+          - generic [ref=e703]: ATK 8
+          - generic [ref=e704]: MOV 3
+          - generic [ref=e705]: RNG 1
+        - generic [ref=e706]: When destroyed, deals damage equal to its max HP to whoever destroyed it.
+      - generic [ref=e709] [cursor=pointer]:
+        - generic [ref=e710]:
+          - generic [ref=e711]: Mystical Elf
+          - generic [ref=e712]: "4"
+        - generic [ref=e713]: Spellcaster / LIGHT
+        - generic [ref=e714]:
+          - generic [ref=e715]: HP 80
+          - generic [ref=e716]: ATK 9
+          - generic [ref=e717]: MOV 2
+          - generic [ref=e718]: RNG 2
+        - generic [ref=e719]: Heals its most wounded adjacent ally for 10 HP at the start of each of its side's turns.
+      - generic [ref=e722] [cursor=pointer]:
+        - generic [ref=e723]:
+          - generic [ref=e724]: Silver Fang
+          - generic [ref=e725]: "3"
+        - generic [ref=e726]: Beast / WATER
+        - generic [ref=e727]:
+          - generic [ref=e728]: HP 38
+          - generic [ref=e729]: ATK 14
+          - generic [ref=e730]: MOV 4
+          - generic [ref=e731]: RNG 1
+        - generic [ref=e732]: Gains +4 ATK for each adjacent living Beast-type ally.
+      - generic [ref=e735] [cursor=pointer]:
+        - generic [ref=e736]:
+          - generic [ref=e737]: Summoned Skull
+          - generic [ref=e738]: "6"
+        - generic [ref=e739]: Fiend / DARK
+        - generic [ref=e740]:
+          - generic [ref=e741]: HP 50
+          - generic [ref=e742]: ATK 27
+          - generic [ref=e743]: MOV 2
+          - generic [ref=e744]: RNG 1
+        - generic [ref=e745]: Its attacks ignore enemy damage-reduction effects.
+  - button "CONFIRM TEAM" [ref=e277] [cursor=pointer]

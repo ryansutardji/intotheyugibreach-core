@@ -1,0 +1,19 @@
+- generic [ref=e8]:
+  - heading "SELECT A MISSION" [level=1] [ref=e9]
+  - generic [ref=e11]:
+    - generic [ref=e1115] [cursor=pointer]:
+      - generic [ref=e1116]: Domino City
+      - generic [ref=e1117]: BUDGET 10
+    - generic [ref=e1118] [cursor=pointer]:
+      - generic [ref=e1119]: Duelist Kingdom
+      - generic [ref=e1120]: BUDGET 13
+    - generic [ref=e1121] [cursor=pointer]:
+      - generic [ref=e1122]: Battle City
+      - generic [ref=e1123]: BUDGET 16
+    - generic [ref=e1124] [cursor=pointer]:
+      - generic [ref=e1125]: Waking the Dragons
+      - generic [ref=e1126]: BUDGET 19
+    - generic [ref=e1127] [cursor=pointer]:
+      - generic [ref=e1128]: Shadow Realm
+      - generic [ref=e1129]: BUDGET 22
+  - button "BACK TO BASE" [ref=e33] [cursor=pointer]

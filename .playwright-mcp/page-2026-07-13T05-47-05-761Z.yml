@@ -1,0 +1,37 @@
+- generic [ref=e34]:
+  - heading "DRAFT YOUR TEAM" [level=1] [ref=e35]
+  - generic [ref=e36]:
+    - generic [ref=e37]: "MISSION: Domino City — BUDGET 10"
+    - generic [ref=e38]: "BUDGET: 4 / 10 REMAINING"
+  - generic [ref=e980]:
+    - heading "DRAFT RESULTS" [level=3] [ref=e981]
+    - generic [ref=e982]:
+      - generic [ref=e983]: YOUR TEAM
+      - generic [ref=e984]:
+        - generic [ref=e985]: Kuriboh
+        - generic [ref=e986]: "1"
+      - generic [ref=e987]:
+        - generic [ref=e988]: Man-Eater Bug
+        - generic [ref=e989]: "2"
+      - generic [ref=e990]:
+        - generic [ref=e991]: Giant Soldier of Stone
+        - generic [ref=e992]: "3"
+      - generic [ref=e993]:
+        - generic [ref=e994]: TOTAL
+        - generic [ref=e995]: 6 / 10
+      - generic [ref=e996]: ENEMY TEAM (Domino City)
+      - generic [ref=e997]:
+        - generic [ref=e998]: Summoned Skull
+        - generic [ref=e999]: "6"
+      - generic [ref=e1000]:
+        - generic [ref=e1001]: Man-Eater Bug
+        - generic [ref=e1002]: "2"
+      - generic [ref=e1003]:
+        - generic [ref=e1004]: Kuriboh
+        - generic [ref=e1005]: "1"
+      - generic [ref=e1006]:
+        - generic [ref=e1007]: TOTAL
+        - generic [ref=e1008]: 9 / 10
+    - generic [ref=e1009]:
+      - button "REDRAFT" [ref=e1010] [cursor=pointer]
+      - button "DEPLOY TROOPS" [ref=e1011] [cursor=pointer]

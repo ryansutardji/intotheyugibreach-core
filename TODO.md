@@ -30,7 +30,7 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 - [ ] **Currency — Star Chips.** Earned as a reward for winning an encounter (no reward
       on a loss — losing should cost real opportunity, not just be a free retry). Spent
       at home base on recruiting bench units and on budget-cap upgrades.
-- [ ] **Unit death is permanent.** A unit that dies during an encounter is removed from
+- [x] **Unit death is permanent.** A unit that dies during an encounter is removed from
       the roster *and* the bench forever — it does not return, healed or otherwise. This
       is the real cost of a bad encounter, even though survivors fully heal at home base.
 - [ ] **Losing an encounter does not end the run.** If the active squad is wiped in a

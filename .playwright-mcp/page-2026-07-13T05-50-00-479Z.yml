@@ -1,0 +1,37 @@
+- generic [ref=e34]:
+  - heading "DRAFT YOUR TEAM" [level=1] [ref=e35]
+  - generic [ref=e36]:
+    - generic [ref=e37]: "MISSION: Duelist Kingdom — BUDGET 13"
+    - generic [ref=e38]: "BUDGET: 2 / 10 REMAINING"
+  - generic [ref=e980]:
+    - heading "DRAFT RESULTS" [level=3] [ref=e981]
+    - generic [ref=e982]:
+      - generic [ref=e1832]: YOUR TEAM
+      - generic [ref=e1833]:
+        - generic [ref=e1834]: Gaia the Fierce Knight
+        - generic [ref=e1835]: "7"
+      - generic [ref=e1836]:
+        - generic [ref=e1837]: Kuriboh
+        - generic [ref=e1838]: "1"
+      - generic [ref=e1839]:
+        - generic [ref=e1840]: TOTAL
+        - generic [ref=e1841]: 8 / 10
+      - generic [ref=e1842]: ENEMY TEAM (Duelist Kingdom)
+      - generic [ref=e1843]:
+        - generic [ref=e1844]: Flame Swordsman
+        - generic [ref=e1845]: "5"
+      - generic [ref=e1846]:
+        - generic [ref=e1847]: Kuriboh
+        - generic [ref=e1848]: "1"
+      - generic [ref=e1849]:
+        - generic [ref=e1850]: Feral Imp
+        - generic [ref=e1851]: "4"
+      - generic [ref=e1852]:
+        - generic [ref=e1853]: Baby Dragon
+        - generic [ref=e1854]: "3"
+      - generic [ref=e1855]:
+        - generic [ref=e1856]: TOTAL
+        - generic [ref=e1857]: 13 / 13
+    - generic [ref=e1009]:
+      - button "REDRAFT" [ref=e1010] [cursor=pointer]
+      - button "DEPLOY TROOPS" [ref=e1011] [cursor=pointer]
