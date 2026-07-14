@@ -225,6 +225,7 @@
 
   #title-screen,
   #home-screen,
+  #gameover-screen,
   #map-screen,
   #draft-screen,
   #recruit-screen,
@@ -241,6 +242,7 @@
 
   #title-screen.hidden,
   #home-screen.hidden,
+  #gameover-screen.hidden,
   #map-screen.hidden,
   #draft-screen.hidden,
   #recruit-screen.hidden,
@@ -248,7 +250,8 @@
   .game-container.hidden { display: none; }
 
   #title-screen .subtitle,
-  #home-screen .subtitle {
+  #home-screen .subtitle,
+  #gameover-screen .subtitle {
     text-align: center;
     font-size: 12px;
     color: #666a80;
@@ -466,6 +469,16 @@
   </div>
 </div>
 
+<div id="gameover-screen" class="hidden">
+  <h1 class="title">GAME OVER</h1>
+  <div class="panel">
+    <div class="subtitle">Your forces have been completely wiped out — active roster and bench both empty. The run resets from scratch.</div>
+  </div>
+  <div class="btn-row">
+    <button id="gameover-restart-btn" class="primary">START NEW RUN</button>
+  </div>
+</div>
+
 <div id="map-screen" class="hidden">
   <h1 class="title">SELECT A MISSION</h1>
   <div class="panel">
@@ -658,6 +671,8 @@
   const legendRowsEl = document.getElementById('legend-rows');
   const titleScreenEl = document.getElementById('title-screen');
   const homeScreenEl = document.getElementById('home-screen');
+  const gameoverScreenEl = document.getElementById('gameover-screen');
+  const gameoverRestartBtn = document.getElementById('gameover-restart-btn');
   const mapScreenEl = document.getElementById('map-screen');
   const draftScreenEl = document.getElementById('draft-screen');
   const recruitScreenEl = document.getElementById('recruit-screen');
@@ -1354,6 +1369,7 @@
   function showScreen(name) {
     titleScreenEl.classList.toggle('hidden', name !== 'title');
     homeScreenEl.classList.toggle('hidden', name !== 'home');
+    gameoverScreenEl.classList.toggle('hidden', name !== 'gameover');
     mapScreenEl.classList.toggle('hidden', name !== 'map');
     draftScreenEl.classList.toggle('hidden', name !== 'draft');
     recruitScreenEl.classList.toggle('hidden', name !== 'recruit');
@@ -1390,12 +1406,27 @@
   function renderHomeScreen() {
     document.getElementById('star-chips-count').textContent = starChips;
     document.getElementById('budget-cap-count').textContent = budgetCap;
+    deployBtn.disabled = activeRoster.length === 0;
+  }
+
+  function triggerGameOver() {
+    starChips = 0;
+    budgetCap = DRAFT_BUDGET;
+    recruitPool = generateRecruitPool();
+    recruitPoolFrozen = false;
+    showScreen('gameover');
   }
 
   function returnToHomeBase() {
     pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
+
+    if (activeRoster.length === 0 && bench.length === 0) {
+      triggerGameOver();
+      return;
+    }
+
     if (recruitPoolFrozen) {
       recruitPoolFrozen = false;
     } else {
@@ -1426,19 +1457,14 @@
     missionIndicatorEl.style.display = '';
     renderMissionIndicator();
 
-    if (activeRoster.length === 0) {
-      // No permanent squad yet — this is the one-time draft that builds it.
-      redraftBtn.style.display = '';
-      budgetMeterEl.style.display = '';
-      renderUnitGrid();
-    } else {
-      // Squad already exists — never ask the player to draft again. Field the
-      // whole roster automatically and go straight to the enemy-preview screen.
-      selectedPlayerUnits = activeRoster.map(entry => entry.unitId);
-      redraftBtn.style.display = 'none';
-      budgetMeterEl.style.display = 'none';
-      confirmTeam();
-    }
+    // The squad always exists by the time a node is reachable (the very first draft
+    // is fully handled by confirmTeam's currentNode == null branch, and DEPLOY is
+    // disabled whenever activeRoster is empty) — never ask the player to draft again,
+    // just field the whole roster and go straight to the enemy-preview screen.
+    selectedPlayerUnits = activeRoster.map(entry => entry.unitId);
+    redraftBtn.style.display = 'none';
+    budgetMeterEl.style.display = 'none';
+    confirmTeam();
   }
 
   function renderMap() {
@@ -1464,6 +1490,7 @@
   }
 
   startGameBtn.addEventListener('click', startInitialDraft);
+  gameoverRestartBtn.addEventListener('click', startInitialDraft);
 
   deployBtn.addEventListener('click', () => {
     renderMap();
@@ -1576,7 +1603,6 @@
 
   const RESPIN_COST = 3;
   const FREEZE_COST = 3;
-  const RECRUIT_MARKUP = 2;
 
   function generateRecruitPool() {
     const ids = Object.keys(UNIT_DATABASE);
@@ -1591,7 +1617,7 @@
   let recruitPoolFrozen = false;
 
   function recruitCost(unitId) {
-    return UNIT_DATABASE[unitId].cost + RECRUIT_MARKUP;
+    return UNIT_DATABASE[unitId].cost;
   }
 
   function renderRecruitScreen() {
@@ -1916,10 +1942,6 @@
   }
 
   function enterPlacementPhase() {
-    if (activeRoster.length === 0) {
-      activeRoster = selectedPlayerUnits.map(makeRosterEntry);
-    }
-
     phase = 'placement';
     units = [];
     nextId = 1;

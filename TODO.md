@@ -33,17 +33,22 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 - [x] **Unit death is permanent.** A unit that dies during an encounter is removed from
       the roster *and* the bench forever — it does not return, healed or otherwise. This
       is the real cost of a bad encounter, even though survivors fully heal at home base.
-- [ ] **Losing an encounter does not end the run.** If the active squad is wiped in a
-      fight, the player returns to home base (dead units are gone per above), can pull
-      replacements from the bench, and retries — current default assumption: same node,
-      same difficulty, AI redrafts fresh (not literally identical every retry, but not
-      escalated just because the player failed). No Star Chip reward for the failed
-      attempt.
-- [ ] **True game over / permadeath.** The run only fully resets (back to a fresh start,
-      per original idea) when the player has **no units left anywhere** — active roster
-      and bench both empty, nothing left to field. As long as at least one bench unit
-      survives somewhere, the player can keep going.
-- [ ] **Leveling — per-instance XP tied to encounter outcomes.** Each roster entry
+- [x] **Losing an encounter does not end the run.** If the active squad is wiped in a
+      fight, the player returns to home base (dead units are gone per above) with
+      DEPLOY disabled until the active roster holds at least one unit again — forcing a
+      trip through MANAGE SQUAD to pull replacements from the bench before retrying.
+      Same node, same difficulty, AI redrafts fresh (not literally identical every
+      retry, but not escalated just because the player failed). No Star Chip reward for
+      the failed attempt.
+- [x] **True game over / permadeath.** The run only fully resets (back to a fresh
+      start) when the player has **no units left anywhere** — active roster and bench
+      both empty, nothing left to field. As long as at least one bench unit survives
+      somewhere, the player can keep going. Detected in `returnToHomeBase()` right
+      after dead entries are pruned; when it fires, Star Chips/budget cap/recruit pool
+      all reset and a dedicated GAME OVER screen shows before dropping the player
+      straight into a fresh squad draft (same entry point as the title screen's START
+      GAME).
+- [x] **Leveling — per-instance XP tied to encounter outcomes.** Each roster entry
       (`{rosterId, unitId}`) gains a persistent `level` (starts at 1) and `xp` (starts
       at 0) stored alongside it, so growth survives across encounters the same way the
       roster itself does, and is wiped along with the unit on permadeath. Newly
@@ -98,9 +103,7 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 
 - Map generation: procedural vs. fixed layout, how many nodes, node variety/types
   beyond "normal" and "boss."
-- Exact Star Chip amounts: recruit cost is `unit cost + 2`, budget-cap upgrade is
-  `current cap * 2` for +1 cap, respin/freeze are 3 each — may want tuning once
-  playtested. Per-win reward amount still just `node.budget`.
+- Exact Star Chip amounts: recruit cost equals the unit's budget cost, budget-cap
+  upgrade is `current cap * 2` for +1 cap, respin/freeze are 3 each — may want tuning
+  once playtested. Per-win reward amount still just `node.budget`.
 - What the "equip modifier" reward actually does mechanically (Spell/Trap flavor).
-- Retry behavior details: confirm "same node/difficulty, fresh AI redraft, no reward"
-  is really the desired default for a failed encounter.
