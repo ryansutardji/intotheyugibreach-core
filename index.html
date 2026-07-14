@@ -291,6 +291,14 @@
 
   .map-node:hover { border-color: #8bac0f; }
 
+  .map-node.cleared {
+    cursor: default;
+    opacity: 0.45;
+    background: #1c1c2a;
+  }
+
+  .map-node.cleared:hover { border-color: #55557a; }
+
   .map-node-name {
     font-size: 11px;
     letter-spacing: 1px;
@@ -630,11 +638,11 @@
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
 
   const MAP_NODES = [
-    { id: 'domino_city', name: 'Domino City', budget: 10, x: 15, y: 82 },
-    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 13, x: 35, y: 55 },
-    { id: 'battle_city', name: 'Battle City', budget: 16, x: 55, y: 78 },
-    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 19, x: 75, y: 42 },
-    { id: 'shadow_realm', name: 'Shadow Realm', budget: 22, x: 88, y: 18 },
+    { id: 'domino_city', name: 'Domino City', budget: 4, x: 15, y: 82 },
+    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 8, x: 35, y: 55 },
+    { id: 'battle_city', name: 'Battle City', budget: 10, x: 55, y: 78 },
+    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 14, x: 75, y: 42 },
+    { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 88, y: 18 },
   ];
 
   const MAP_PATHS = [
@@ -716,6 +724,16 @@
   let aiRunning = false;
 
   let currentNode = null;
+  // Set true by endGame(true) for the currently active node; checked by
+  // returnToHomeBase to decide whether to lock the node out as cleared. A loss or
+  // a mid-battle retreat leaves this false, so the node stays replayable.
+  let currentNodeWon = false;
+
+  // A stage can only be played once per run: any node beaten (see endGame/
+  // returnToHomeBase) goes in here and becomes unclickable on the map for the
+  // rest of the run. Losing or retreating does NOT clear a node. Reset on
+  // triggerGameOver.
+  let clearedNodes = new Set();
 
   let selectedUnit = null;
   let reachableTiles = [];
@@ -962,6 +980,7 @@
       bannerSubEl.textContent = currentNode.name + ' secured.';
       starChips += currentNode.budget;
       bannerSubEl.textContent += ' +' + currentNode.budget + ' Star Chips earned.';
+      currentNodeWon = true;
     } else {
       bannerTextEl.textContent = 'DEFEAT';
       bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
@@ -1385,6 +1404,7 @@
     round = 1;
     gameOver = false;
     aiRunning = false;
+    currentNodeWon = false;
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
@@ -1414,10 +1434,16 @@
     budgetCap = DRAFT_BUDGET;
     recruitPool = generateRecruitPool();
     recruitPoolFrozen = false;
+    clearedNodes = new Set();
+    clearSave();
     showScreen('gameover');
   }
 
   function returnToHomeBase() {
+    // Only a win locks a node out — losing or retreating leaves it replayable.
+    // This runs before resetBattleAndDraftState() clears currentNodeWon below.
+    if (currentNode != null && currentNodeWon) clearedNodes.add(currentNode.id);
+
     pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
@@ -1432,6 +1458,7 @@
     } else {
       recruitPool = generateRecruitPool();
     }
+    saveGame();
     showScreen('home');
     renderHomeScreen();
   }
@@ -1451,6 +1478,7 @@
   }
 
   function enterDraftForNode(node) {
+    if (clearedNodes.has(node.id)) return;
     resetBattleAndDraftState();
     currentNode = node;
     showScreen('draft');
@@ -1477,14 +1505,15 @@
     }).join('');
 
     MAP_NODES.forEach(node => {
+      const cleared = clearedNodes.has(node.id);
       const el = document.createElement('div');
-      el.className = 'map-node';
+      el.className = 'map-node' + (cleared ? ' cleared' : '');
       el.style.left = node.x + '%';
       el.style.top = node.y + '%';
       el.innerHTML =
         '<div class="map-node-name">' + node.name + '</div>' +
-        '<div class="map-node-budget">BUDGET ' + node.budget + '</div>';
-      el.addEventListener('click', () => enterDraftForNode(node));
+        '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>';
+      if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
       mapCanvasEl.appendChild(el);
     });
   }
@@ -1502,13 +1531,17 @@
   // ---------- Persistent Roster ----------
   // Owned across the whole run: persists across encounters (win or lose), and is
   // drafted exactly once — every subsequent deploy fields the same roster with no
-  // redraft. There's no localStorage in this codebase, so "persistence" means
-  // "survives repeated encounters," not "survives a page reload" — a fresh page
-  // load is a fresh run. Bootstrap: both start empty; the roster is populated the
-  // first time the player confirms a squad (see enterPlacementPhase). Bench stays
-  // empty until a recruit system exists to put anything there. Each entry carries
-  // a stable rosterId so later features (permadeath, per-instance leveling) can
-  // identify one specific owned unit without another data-model rewrite.
+  // redraft. Meta-progression (roster, bench, star chips, budget cap, recruit pool)
+  // is checkpointed to localStorage via saveGame() below, so it survives a page
+  // reload too — a fresh page load resumes the run at Home Base if a save exists.
+  // Mid-encounter state (the battle grid, an in-progress draft/placement) is NOT
+  // saved: refreshing during a mission discards that attempt and drops the player
+  // back at Home Base with whatever was last checkpointed. Bootstrap: both start
+  // empty; the roster is populated the first time the player confirms a squad (see
+  // enterPlacementPhase). Bench stays empty until a recruit system exists to put
+  // anything there. Each entry carries a stable rosterId so later features
+  // (permadeath, per-instance leveling) can identify one specific owned unit
+  // without another data-model rewrite.
 
   let nextRosterId = 1;
   function makeRosterEntry(unitId) {
@@ -1616,6 +1649,52 @@
   let recruitPool = generateRecruitPool();
   let recruitPoolFrozen = false;
 
+  // ---------- Save / Load ----------
+  // Checkpoints meta-progression to localStorage. Called after every action that
+  // mutates activeRoster/bench/starChips/budgetCap/recruitPool so a reload always
+  // resumes from the last completed action, not just from Home Base.
+
+  const SAVE_KEY = 'yugibreach-save-v1';
+
+  function saveGame() {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      nextRosterId,
+      activeRoster,
+      bench,
+      starChips,
+      budgetCap,
+      recruitPool,
+      recruitPoolFrozen,
+      clearedNodes: [...clearedNodes],
+    }));
+  }
+
+  function clearSave() {
+    localStorage.removeItem(SAVE_KEY);
+  }
+
+  // Restores meta-progression from localStorage if a save exists. Returns whether
+  // a save was loaded so the caller can decide which screen to open on.
+  function loadGame() {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    try {
+      const data = JSON.parse(raw);
+      nextRosterId = data.nextRosterId;
+      activeRoster = data.activeRoster;
+      bench = data.bench;
+      starChips = data.starChips;
+      budgetCap = data.budgetCap;
+      recruitPool = data.recruitPool;
+      recruitPoolFrozen = data.recruitPoolFrozen;
+      clearedNodes = new Set(data.clearedNodes || []);
+      return true;
+    } catch (e) {
+      clearSave();
+      return false;
+    }
+  }
+
   function recruitCost(unitId) {
     return UNIT_DATABASE[unitId].cost;
   }
@@ -1664,6 +1743,7 @@
     starChips -= price;
     bench.push(makeRosterEntry(id));
     recruitPool[slot] = null;
+    saveGame();
     renderRecruitScreen();
   });
 
@@ -1672,6 +1752,7 @@
     starChips -= RESPIN_COST;
     recruitPool = generateRecruitPool();
     recruitPoolFrozen = false;
+    saveGame();
     renderRecruitScreen();
   });
 
@@ -1679,6 +1760,7 @@
     if (recruitPoolFrozen || starChips < FREEZE_COST) return;
     starChips -= FREEZE_COST;
     recruitPoolFrozen = true;
+    saveGame();
     renderRecruitScreen();
   });
 
@@ -1743,6 +1825,7 @@
     if (idx === -1) return;
     const [entry] = activeRoster.splice(idx, 1);
     bench.push(entry);
+    saveGame();
     renderSquadScreen();
   });
 
@@ -1754,6 +1837,7 @@
     if (idx === -1) return;
     const [entry] = bench.splice(idx, 1);
     activeRoster.push(entry);
+    saveGame();
     renderSquadScreen();
   });
 
@@ -1762,6 +1846,7 @@
     if (starChips < capCost) return;
     starChips -= capCost;
     budgetCap += 1;
+    saveGame();
     renderSquadScreen();
   });
 
@@ -1876,6 +1961,7 @@
     if (currentNode == null) {
       // Initial squad draft: no enemy to preview, just bank the pick and head to base.
       activeRoster = selectedPlayerUnits.map(makeRosterEntry);
+      saveGame();
       showScreen('home');
       renderHomeScreen();
       return;
@@ -2061,7 +2147,14 @@
 
   beginBattleBtn.addEventListener('click', beginBattle);
 
-  showScreen('title');
+  // Resume the last checkpointed run at Home Base if a save exists; otherwise a
+  // fresh page load is a fresh run starting at the title screen.
+  if (loadGame()) {
+    showScreen('home');
+    renderHomeScreen();
+  } else {
+    showScreen('title');
+  }
 })();
 </script>
 </body>
