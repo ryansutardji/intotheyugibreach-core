@@ -43,11 +43,50 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
       per original idea) when the player has **no units left anywhere** — active roster
       and bench both empty, nothing left to field. As long as at least one bench unit
       survives somewhere, the player can keep going.
-- [ ] **Leveling**: units gain stats via per-kill XP (not flat +X per win), echoing the
-      existing `baby_dragon` "+3 ATK per kill" effect already in `units-db.js`. Ties
-      growth to how the fight actually went. Now sits on top of persistent units rather
-      than being moot (previously units never survived past one stage, so growth had
-      nowhere to accumulate).
+- [ ] **Leveling — per-instance XP tied to encounter outcomes.** Each roster entry
+      (`{rosterId, unitId}`) gains a persistent `level` (starts at 1) and `xp` (starts
+      at 0) stored alongside it, so growth survives across encounters the same way the
+      roster itself does, and is wiped along with the unit on permadeath. Newly
+      recruited or drafted units always start at Level 1 / 0 XP. Enemy AI units are
+      never given a roster entry, so they have nothing to level up on and always fight
+      at base `UNIT_DATABASE` stats — this falls out of the existing data model for
+      free with no special-casing; scaling opponent levels is a separate future item.
+      - **XP curve.** XP required to go from level `L` to `L+1` is `10 * L` — leveling
+        1→2 costs 10 XP, 2→3 costs 20, 3→4 costs 30, and so on, growing linearly so
+        early levels come quickly and later ones take meaningfully longer. Deliberately
+        low at level 1 so any unit that survives the very first encounter levels up at
+        least once off survival XP alone, making growth felt right away. XP carries any
+        remainder past a threshold (a big multi-kill haul can cross more than one level
+        at once). Cumulative XP to reach level 5 is 100; level 10 is 450. Same curve for
+        every unit — no per-unit XP scaling.
+      - **XP rewards.** A unit earns `10 XP` for surviving to the end of an encounter it
+        was deployed in (win, or any future non-wipe retreat), plus `40 XP` for every
+        kill it personally lands during that encounter — kills are weighted 4x survival
+        XP since kills should be heavily rewarded. Only units that survive the encounter
+        receive any XP; a unit that died is gone forever regardless (permadeath), so
+        awarding XP to it would be moot. Kill credit reuses the "attacker" convention
+        `onUnitDeath` already establishes for `baby_dragon`'s growth, so chain-kills
+        (man_eater_bug retaliation, flame_swordsman splash, celtic_guardian counters)
+        attribute correctly with no new logic needed.
+      - **Level-up reward.** Every level grants a flat, uniform `+6 HP` and `+2 ATK`,
+        applied identically regardless of the unit's type or cost — no per-unit scaling,
+        matching the flat-number style of `baby_dragon`'s own "+3 ATK/kill". No level
+        cap — the linearly growing XP curve throttles pace on its own as levels climb.
+      - **Interaction with baby_dragon's unique effect.** Its existing "+3 ATK
+        permanently per kill" is untouched and keeps firing mid-battle exactly as today,
+        stacking on top of (not replacing) the generic per-kill XP it also now earns
+        toward leveling — it's meant to end up literally stronger than a same-level unit
+        of another type, since that's the point of it being a unique card.
+      - **Where stats live.** Base `UNIT_DATABASE` entries are never mutated. A leveled
+        unit's effective HP/ATK are computed as `base + growth * (level - 1)` at the
+        moment a battlefield instance is created, the same place `rosterId` is already
+        threaded through — mirrors the existing hard split between static definitions
+        and runtime instances.
+      - **UI surfaces.** Level and an XP progress readout should appear anywhere a
+        roster entry's card already renders outside of battle — home base squad/bench
+        cards and the placement-phase roster list — plus a LEVEL row in the in-battle
+        unit-info panel. The one-time initial draft and recruit-pool cards don't need
+        it, since every unit shown there is always Level 1.
 - [ ] **Boss nodes**: special high-value/high-difficulty nodes on the map (single
       scripted high-cost monster — Blue-Eyes, Exodia pieces, etc.) instead of a normal
       AI draft, replacing the old "every N stages" cadence now that stages aren't linear.
@@ -62,7 +101,6 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 - Exact Star Chip amounts: recruit cost is `unit cost + 2`, budget-cap upgrade is
   `current cap * 2` for +1 cap, respin/freeze are 3 each — may want tuning once
   playtested. Per-win reward amount still just `node.budget`.
-- Exact XP curve / stat growth formula per level-up.
 - What the "equip modifier" reward actually does mechanically (Spell/Trap flavor).
 - Retry behavior details: confirm "same node/difficulty, fresh AI redraft, no reward"
   is really the desired default for a failed encounter.

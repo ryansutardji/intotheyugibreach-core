@@ -381,6 +381,27 @@
     line-height: 1.4;
   }
 
+  .xp-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    margin: 4px 0 2px;
+  }
+
+  .xp-level { color: #8bac0f; font-weight: bold; }
+  .xp-text { color: #666a80; }
+
+  .xp-bar {
+    height: 5px;
+    background: #1a1a2e;
+    border: 1px solid #44445a;
+  }
+
+  .xp-bar-fill {
+    height: 100%;
+    background: #8bac0f;
+  }
+
   .roster-label {
     font-size: 11px;
     letter-spacing: 1px;
@@ -689,14 +710,15 @@
   let playerDeaths = 0;
   let enemyDeaths = 0;
 
-  function makeUnit(team, unitId, x, y, rosterId = null) {
+  function makeUnit(team, unitId, x, y, rosterId = null, level = 1) {
     const t = UNIT_DATABASE[unitId];
+    const { hp, atk } = statsForLevel(unitId, level);
     return {
       id: nextId++, team, unitId, rosterId, x, y,
       name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
-      hp: t.hp, maxHp: t.hp, atk: t.atk, move: t.move, range: t.range,
+      hp, maxHp: hp, atk, move: t.move, range: t.range, level,
       alive: true, hasMoved: false, turnDone: false,
-      movedThisTurn: false, attacksUsed: 0, usedSacrifice: false,
+      movedThisTurn: false, attacksUsed: 0, usedSacrifice: false, kills: 0,
     };
   }
 
@@ -819,6 +841,7 @@
 
   function onUnitDeath(defender, attacker) {
     if (defender.team === 'player') playerDeaths += 1; else enemyDeaths += 1;
+    attacker.kills += 1;
 
     if (defender.unitId === 'man_eater_bug' && attacker.alive) {
       const retaliation = defender.maxHp;
@@ -928,6 +951,8 @@
       bannerTextEl.textContent = 'DEFEAT';
       bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
     }
+
+    awardUnitXp();
 
     const lostNames = units.filter(u => u.team === 'player' && !u.alive).map(u => u.name);
     if (lostNames.length) {
@@ -1252,6 +1277,7 @@
   }
 
   function statsHtml(u) {
+    const entry = u.rosterId != null ? findRosterEntry(u.rosterId) : null;
     return (
       '<div class="unit-info-header">' +
         '<img class="unit-info-thumb" src="' + spritePath(u.unitId) + '" alt="">' +
@@ -1259,6 +1285,7 @@
           labelOf(u) + (u.turnDone ? ' (done)' : '') +
         '</div>' +
       '</div>' +
+      xpBarHtml(entry || { level: u.level, xp: 0 }) +
       '<div class="stat-row"><span>TYPE</span><span>' + u.monsterType + '</span></div>' +
       '<div class="stat-row"><span>ATTRIBUTE</span><span>' + u.attribute + '</span></div>' +
       '<div class="stat-row"><span>COST</span><span>' + u.cost + '</span></div>' +
@@ -1458,7 +1485,7 @@
 
   let nextRosterId = 1;
   function makeRosterEntry(unitId) {
-    return { rosterId: nextRosterId++, unitId };
+    return { rosterId: nextRosterId++, unitId, level: 1, xp: 0 };
   }
 
   let activeRoster = [];
@@ -1466,6 +1493,67 @@
   let starChips = 0;
   const DRAFT_BUDGET = 10;
   let budgetCap = DRAFT_BUDGET; // raised via home base's "Increase Budget Cap"
+
+  // ---------- Leveling ----------
+  // Each roster entry carries its own level/xp, independent of the base
+  // UNIT_DATABASE stats (which are never mutated). Enemy units never have a
+  // roster entry, so they always fight at level 1 with no lookup needed.
+
+  const XP_PER_SURVIVAL = 10;
+  const XP_PER_KILL = 40;
+  const LEVEL_UP_HP_GAIN = 6;
+  const LEVEL_UP_ATK_GAIN = 2;
+
+  function xpToNextLevel(level) {
+    return 10 * level;
+  }
+
+  function statsForLevel(unitId, level) {
+    const t = UNIT_DATABASE[unitId];
+    const growthLevels = level - 1;
+    return {
+      hp: t.hp + LEVEL_UP_HP_GAIN * growthLevels,
+      atk: t.atk + LEVEL_UP_ATK_GAIN * growthLevels,
+    };
+  }
+
+  // Mutates entry in place; returns how many levels were gained (0 if none).
+  function grantXp(entry, amount) {
+    entry.xp += amount;
+    let levelsGained = 0;
+    while (entry.xp >= xpToNextLevel(entry.level)) {
+      entry.xp -= xpToNextLevel(entry.level);
+      entry.level += 1;
+      levelsGained += 1;
+    }
+    return levelsGained;
+  }
+
+  function findRosterEntry(rosterId) {
+    return activeRoster.find(e => e.rosterId === rosterId) || bench.find(e => e.rosterId === rosterId) || null;
+  }
+
+  function awardUnitXp() {
+    units.filter(u => u.team === 'player' && u.alive && u.rosterId != null).forEach(u => {
+      const entry = findRosterEntry(u.rosterId);
+      if (!entry) return;
+      const xpGained = XP_PER_SURVIVAL + u.kills * XP_PER_KILL;
+      const levelsGained = grantXp(entry, xpGained);
+      log(labelOf(u) + ' gains ' + xpGained + ' XP.' + (levelsGained > 0 ? ' Reaches Level ' + entry.level + '!' : ''));
+    });
+  }
+
+  function xpBarHtml(entry) {
+    const need = xpToNextLevel(entry.level);
+    const pct = Math.max(0, Math.min(100, Math.round((entry.xp / need) * 100)));
+    return (
+      '<div class="xp-row">' +
+        '<span class="xp-level">LV ' + entry.level + '</span>' +
+        '<span class="xp-text">' + entry.xp + '/' + need + ' XP</span>' +
+      '</div>' +
+      '<div class="xp-bar"><div class="xp-bar-fill" style="width:' + pct + '%;"></div></div>'
+    );
+  }
 
   // Unit death is permanent: any player-team battlefield unit still marked dead when the
   // battle screen is left (win, loss, or mid-fight retreat) is stripped from the owned
@@ -1595,6 +1683,7 @@
           '<div class="unit-card-body">' +
             '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
             '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+            xpBarHtml(entry) +
           '</div>' +
         '</div>' +
       '</div>'
@@ -1867,6 +1956,7 @@
             '<div class="unit-card-body">' +
               '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
               '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+              xpBarHtml(entry) +
               '<div class="unit-card-effect">' + u.effect + '</div>' +
             '</div>' +
           '</div>' +
@@ -1898,7 +1988,7 @@
 
     if (!occupant && selectedPlacementRosterId != null && PLAYER_ZONE_X.includes(tx)) {
       const entry = activeRoster.find(e => e.rosterId === selectedPlacementRosterId);
-      units.push(makeUnit('player', entry.unitId, tx, ty, entry.rosterId));
+      units.push(makeUnit('player', entry.unitId, tx, ty, entry.rosterId, entry.level));
       pendingPlayerUnits = pendingPlayerUnits.filter(rid => rid !== selectedPlacementRosterId);
       selectedPlacementRosterId = null;
       renderPlacementRoster();
@@ -1917,7 +2007,7 @@
       }
       if (empty.length === 0) return;
       const tile = empty[Math.floor(Math.random() * empty.length)];
-      units.push(makeUnit('player', entry.unitId, tile.x, tile.y, entry.rosterId));
+      units.push(makeUnit('player', entry.unitId, tile.x, tile.y, entry.rosterId, entry.level));
       pendingPlayerUnits = pendingPlayerUnits.filter(pid => pid !== rid);
     });
     selectedPlacementRosterId = null;
