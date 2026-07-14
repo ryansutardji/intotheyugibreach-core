@@ -1487,6 +1487,7 @@
     missionIndicatorEl.style.display = 'none';
     redraftBtn.style.display = 'none';
     budgetMeterEl.style.display = '';
+    draftPoolIds = shuffledUnitIds().slice(0, 8);
     renderUnitGrid();
   }
 
@@ -1503,6 +1504,7 @@
     // disabled whenever activeRoster is empty) — never ask the player to draft again,
     // just field the whole roster and go straight to the enemy-preview screen.
     selectedPlayerUnits = activeRoster.map(entry => entry.unitId);
+    draftPoolIds = Object.keys(UNIT_DATABASE);
     redraftBtn.style.display = 'none';
     budgetMeterEl.style.display = 'none';
     confirmTeam();
@@ -1650,13 +1652,17 @@
   const RESPIN_COST = 3;
   const FREEZE_COST = 3;
 
-  function generateRecruitPool() {
+  function shuffledUnitIds() {
     const ids = Object.keys(UNIT_DATABASE);
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
     }
-    return ids.slice(0, 5);
+    return ids;
+  }
+
+  function generateRecruitPool() {
+    return shuffledUnitIds().slice(0, 5);
   }
 
   let recruitPool = generateRecruitPool();
@@ -1877,6 +1883,9 @@
 
   let selectedPlayerUnits = [];
   let confirmedAiTeam = [];
+  // Which unit ids the picker grid shows. Restricted to a random 8 for the initial
+  // draft (see startInitialDraft); the full roster otherwise.
+  let draftPoolIds = Object.keys(UNIT_DATABASE);
 
   const unitGridEl = document.getElementById('unit-grid');
   const budgetMeterEl = document.getElementById('budget-meter');
@@ -1916,7 +1925,7 @@
     const remaining = budgetCap - playerSpent();
     budgetRemainingEl.textContent = remaining;
 
-    unitGridEl.innerHTML = Object.keys(UNIT_DATABASE).map(id => {
+    unitGridEl.innerHTML = draftPoolIds.map(id => {
       const u = UNIT_DATABASE[id];
       const isSelected = selectedPlayerUnits.includes(id);
       const affordable = isSelected || u.cost <= remaining;
