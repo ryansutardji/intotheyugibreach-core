@@ -6,7 +6,7 @@
 - [ ] **Equip-style reward**: still open — could be reframed as another thing purchasable
       with Star Chips at home base (a Spell/Trap-flavored modifier attached to one unit)
       rather than a random per-stage node reward.
-- [ ] **Expand the map to ~10 locations**: grow `MAP_NODES` from the current 5 nodes to
+- [x] **Expand the map to ~10 locations**: grow `MAP_NODES` from the current 5 nodes to
       about 10. Location names should stay within the pre-GX Yu-Gi-Oh era (original
       series / Duelist Kingdom / Battle City / Waking the Dragons, etc.) — same theming
       as the existing node names.

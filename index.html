@@ -211,6 +211,8 @@
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.primary { border-color: #8bac0f; color: #9bbc0f; }
   button.primary:hover:not(:disabled) { background: #2f4a1f; }
+  button.danger { border-color: #991b1b; color: #ef8080; }
+  button.danger:hover:not(:disabled) { background: #4a1f1f; color: #fff; }
 
   .legend {
     font-size: 10px;
@@ -261,21 +263,16 @@
   #map-canvas {
     position: relative;
     height: 420px;
-    background: #14141f;
+    background:
+      radial-gradient(ellipse 220px 160px at 12% 20%, rgba(48,98,48,0.35), transparent 70%),
+      radial-gradient(ellipse 240px 170px at 70% 55%, rgba(48,98,48,0.28), transparent 70%),
+      radial-gradient(ellipse 200px 150px at 30% 85%, rgba(15,56,15,0.4), transparent 70%),
+      radial-gradient(ellipse 220px 160px at 88% 80%, rgba(48,98,48,0.24), transparent 70%),
+      radial-gradient(ellipse 200px 140px at 85% 20%, rgba(15,56,15,0.3), transparent 70%),
+      repeating-linear-gradient(0deg, rgba(68,68,90,0.15) 0, rgba(68,68,90,0.15) 1px, transparent 1px, transparent 28px),
+      repeating-linear-gradient(90deg, rgba(68,68,90,0.15) 0, rgba(68,68,90,0.15) 1px, transparent 1px, transparent 28px),
+      #14141f;
     border: 2px solid #44445a;
-  }
-
-  #map-paths {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-  }
-
-  #map-paths line {
-    stroke: #44445a;
-    stroke-width: 2;
-    stroke-dasharray: 4 4;
   }
 
   .map-node {
@@ -475,6 +472,9 @@
     <button id="manage-squad-btn">MANAGE SQUAD</button>
     <button id="recruit-btn">RECRUIT</button>
   </div>
+  <div class="btn-row">
+    <button id="abandon-run-btn" class="danger">ABANDON RUN</button>
+  </div>
 </div>
 
 <div id="gameover-screen" class="hidden">
@@ -490,9 +490,7 @@
 <div id="map-screen" class="hidden">
   <h1 class="title">SELECT A MISSION</h1>
   <div class="panel">
-    <div id="map-canvas">
-      <svg id="map-paths"></svg>
-    </div>
+    <div id="map-canvas"></div>
   </div>
   <div class="btn-row">
     <button id="map-back-btn">BACK TO BASE</button>
@@ -638,18 +636,16 @@
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
 
   const MAP_NODES = [
-    { id: 'domino_city', name: 'Domino City', budget: 4, x: 15, y: 82 },
-    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 8, x: 35, y: 55 },
-    { id: 'battle_city', name: 'Battle City', budget: 10, x: 55, y: 78 },
-    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 14, x: 75, y: 42 },
-    { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 88, y: 18 },
-  ];
-
-  const MAP_PATHS = [
-    ['domino_city', 'duelist_kingdom'],
-    ['duelist_kingdom', 'battle_city'],
-    ['battle_city', 'waking_the_dragons'],
-    ['waking_the_dragons', 'shadow_realm'],
+    { id: 'domino_city', name: 'Domino City', budget: 4, x: 10, y: 20 },
+    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 8, x: 30, y: 68 },
+    { id: 'battle_city', name: 'Battle City', budget: 10, x: 50, y: 15 },
+    { id: 'pegasus_castle', name: "Pegasus's Castle", budget: 11, x: 15, y: 45 },
+    { id: 'kaiba_corp', name: 'Kaiba Corp', budget: 12, x: 68, y: 55 },
+    { id: 'noah_virtual_world', name: "Noah's Virtual World", budget: 13, x: 40, y: 38 },
+    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 14, x: 82, y: 25 },
+    { id: 'ancient_egypt', name: 'Ancient Egypt', budget: 15, x: 25, y: 88 },
+    { id: 'doma', name: 'Doma', budget: 16, x: 88, y: 82 },
+    { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 60, y: 85 },
   ];
 
   function spritePath(unitId) {
@@ -689,6 +685,7 @@
   const startGameBtn = document.getElementById('start-game-btn');
   const missionIndicatorEl = document.getElementById('mission-indicator');
   const deployBtn = document.getElementById('deploy-btn');
+  const abandonRunBtn = document.getElementById('abandon-run-btn');
   const mapBackBtn = document.getElementById('map-back-btn');
   const manageSquadBtn = document.getElementById('manage-squad-btn');
   const recruitBtn = document.getElementById('recruit-btn');
@@ -705,7 +702,6 @@
   const squadBenchEl = document.getElementById('squad-bench');
   const increaseCapBtn = document.getElementById('increase-cap-btn');
   const mapCanvasEl = document.getElementById('map-canvas');
-  const mapPathsEl = document.getElementById('map-paths');
   const turnPanelEl = document.getElementById('turn-panel');
   const battleLogPanelEl = document.getElementById('battle-log-panel');
   const battleBtnRowEl = document.getElementById('battle-btn-row');
@@ -1429,6 +1425,23 @@
     deployBtn.disabled = activeRoster.length === 0;
   }
 
+  // Voluntary full reset from home base, as opposed to triggerGameOver's forced
+  // reset after a wipe: same meta-progression wipe, but also clears the roster/
+  // bench (triggerGameOver never needs to since it's only reached once both are
+  // already empty), then drops the player straight into a fresh initial draft
+  // instead of the game-over screen.
+  function abandonRun() {
+    activeRoster = [];
+    bench = [];
+    starChips = 0;
+    budgetCap = DRAFT_BUDGET;
+    recruitPool = generateRecruitPool();
+    recruitPoolFrozen = false;
+    clearedNodes = new Set();
+    clearSave();
+    startInitialDraft();
+  }
+
   function triggerGameOver() {
     starChips = 0;
     budgetCap = DRAFT_BUDGET;
@@ -1498,12 +1511,6 @@
   function renderMap() {
     mapCanvasEl.querySelectorAll('.map-node').forEach(el => el.remove());
 
-    mapPathsEl.innerHTML = MAP_PATHS.map(([fromId, toId]) => {
-      const from = MAP_NODES.find(n => n.id === fromId);
-      const to = MAP_NODES.find(n => n.id === toId);
-      return '<line x1="' + from.x + '%" y1="' + from.y + '%" x2="' + to.x + '%" y2="' + to.y + '%"></line>';
-    }).join('');
-
     MAP_NODES.forEach(node => {
       const cleared = clearedNodes.has(node.id);
       const el = document.createElement('div');
@@ -1524,6 +1531,12 @@
   deployBtn.addEventListener('click', () => {
     renderMap();
     showScreen('map');
+  });
+
+  abandonRunBtn.addEventListener('click', () => {
+    if (confirm('Abandon this run? Your roster, star chips, and cleared missions will all be lost.')) {
+      abandonRun();
+    }
   });
 
   mapBackBtn.addEventListener('click', () => showScreen('home'));
