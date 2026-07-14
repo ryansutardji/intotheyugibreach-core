@@ -22,12 +22,12 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
       currently fielded). Before each encounter, the player drafts their active squad
       for that fight from currently-available roster units within budget — this replaces
       the old "redraft everything from `UNIT_DATABASE` every stage" behavior.
-- [ ] **Home base actions.** Returning to home base after an encounter lets the player:
+- [x] **Home base actions.** Returning to home base after an encounter lets the player:
       - Fully heal all surviving units (no damage carries between encounters).
       - Swap units between active roster and bench.
       - Spend **Star Chips** (see below) to recruit new units onto the bench, or to
         increase the active roster's max budget cap so more units can be fielded at once.
-- [ ] **Currency — Star Chips.** Earned as a reward for winning an encounter (no reward
+- [x] **Currency — Star Chips.** Earned as a reward for winning an encounter (no reward
       on a loss — losing should cost real opportunity, not just be a free retry). Spent
       at home base on recruiting bench units and on budget-cap upgrades.
 - [x] **Unit death is permanent.** A unit that dies during an encounter is removed from
@@ -59,8 +59,9 @@ stakes and persistence, so repeated play doesn't feel like the same loop.
 
 - Map generation: procedural vs. fixed layout, how many nodes, node variety/types
   beyond "normal" and "boss."
-- Exact Star Chip amounts: recruit cost curve, budget-cap upgrade cost curve, per-win
-  reward amount (probably scales with node difficulty).
+- Exact Star Chip amounts: recruit cost is `unit cost + 2`, budget-cap upgrade is
+  `current cap * 2` for +1 cap, respin/freeze are 3 each — may want tuning once
+  playtested. Per-win reward amount still just `node.budget`.
 - Exact XP curve / stat growth formula per level-up.
 - What the "equip modifier" reward actually does mechanically (Spell/Trap flavor).
 - Retry behavior details: confirm "same node/difficulty, fresh AI redraft, no reward"

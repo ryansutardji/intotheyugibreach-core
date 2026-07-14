@@ -223,9 +223,12 @@
   .swatch { width: 18px; height: 18px; flex-shrink: 0; border: 1px solid #000; object-fit: cover; border-radius: 50%; background: #1a1a2e; }
   .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
 
+  #title-screen,
   #home-screen,
   #map-screen,
-  #draft-screen {
+  #draft-screen,
+  #recruit-screen,
+  #squad-screen {
     width: 640px;
     display: flex;
     flex-direction: column;
@@ -236,11 +239,15 @@
     box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
   }
 
+  #title-screen.hidden,
   #home-screen.hidden,
   #map-screen.hidden,
   #draft-screen.hidden,
+  #recruit-screen.hidden,
+  #squad-screen.hidden,
   .game-container.hidden { display: none; }
 
+  #title-screen .subtitle,
   #home-screen .subtitle {
     text-align: center;
     font-size: 12px;
@@ -392,18 +399,49 @@
     margin-top: 4px;
     color: #f0e68c;
   }
+
+  .empty-hint {
+    color: #666a80;
+    font-size: 11px;
+  }
+
+  .unit-card.empty-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+    border-style: dashed;
+    color: #444a60;
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: default;
+  }
+
+  .unit-card.empty-slot:hover { border-color: #44445a; }
 </style>
 </head>
 <body>
 
-<div id="home-screen">
+<div id="title-screen">
+  <h1 class="title">INTO THE YUGIBREACH</h1>
+  <div class="panel">
+    <div class="subtitle">Draft your starting squad, then defend your home base one mission at a time.</div>
+  </div>
+  <div class="btn-row">
+    <button id="start-game-btn" class="primary">START GAME</button>
+  </div>
+</div>
+
+<div id="home-screen" class="hidden">
   <h1 class="title">HOME BASE</h1>
   <div class="panel">
     <div class="subtitle">Your squad is rested and ready. Choose a mission from the map to deploy.</div>
-    <div id="star-chips-display" class="subtitle">STAR CHIPS: <span id="star-chips-count">0</span></div>
+    <div id="star-chips-display" class="subtitle">STAR CHIPS: <span id="star-chips-count">0</span> — BUDGET CAP: <span id="budget-cap-count">10</span></div>
   </div>
   <div class="btn-row">
     <button id="deploy-btn" class="primary">DEPLOY</button>
+    <button id="manage-squad-btn">MANAGE SQUAD</button>
+    <button id="recruit-btn">RECRUIT</button>
   </div>
 </div>
 
@@ -416,6 +454,34 @@
   </div>
   <div class="btn-row">
     <button id="map-back-btn">BACK TO BASE</button>
+  </div>
+</div>
+
+<div id="recruit-screen" class="hidden">
+  <h1 class="title">RECRUIT</h1>
+  <div class="panel">
+    <div class="subtitle">STAR CHIPS: <span id="recruit-star-chips-count">0</span></div>
+    <div class="unit-grid" id="recruit-grid"></div>
+  </div>
+  <div class="btn-row">
+    <button id="recruit-back-btn">BACK TO BASE</button>
+    <button id="respin-btn">RESPIN (3)</button>
+    <button id="freeze-btn">FREEZE (3)</button>
+  </div>
+</div>
+
+<div id="squad-screen" class="hidden">
+  <h1 class="title">MANAGE SQUAD</h1>
+  <div class="panel">
+    <div class="subtitle">STAR CHIPS: <span id="squad-star-chips-count">0</span></div>
+    <div id="squad-budget-meter">ACTIVE: <span id="squad-active-total">0</span> / <span id="squad-budget-cap">10</span></div>
+    <div id="squad-roster"></div>
+    <div class="roster-label">BENCH</div>
+    <div id="squad-bench"></div>
+  </div>
+  <div class="btn-row">
+    <button id="squad-back-btn">BACK TO BASE</button>
+    <button id="increase-cap-btn">INCREASE BUDGET CAP</button>
   </div>
 </div>
 
@@ -569,12 +635,31 @@
   const bannerSubEl = document.getElementById('banner-sub');
   const bannerRestartBtn = document.getElementById('banner-restart');
   const legendRowsEl = document.getElementById('legend-rows');
+  const titleScreenEl = document.getElementById('title-screen');
   const homeScreenEl = document.getElementById('home-screen');
   const mapScreenEl = document.getElementById('map-screen');
   const draftScreenEl = document.getElementById('draft-screen');
+  const recruitScreenEl = document.getElementById('recruit-screen');
+  const squadScreenEl = document.getElementById('squad-screen');
   const gameContainerEl = document.querySelector('.game-container');
+  const startGameBtn = document.getElementById('start-game-btn');
+  const missionIndicatorEl = document.getElementById('mission-indicator');
   const deployBtn = document.getElementById('deploy-btn');
   const mapBackBtn = document.getElementById('map-back-btn');
+  const manageSquadBtn = document.getElementById('manage-squad-btn');
+  const recruitBtn = document.getElementById('recruit-btn');
+  const recruitBackBtn = document.getElementById('recruit-back-btn');
+  const squadBackBtn = document.getElementById('squad-back-btn');
+  const recruitGridEl = document.getElementById('recruit-grid');
+  const recruitStarChipsEl = document.getElementById('recruit-star-chips-count');
+  const respinBtn = document.getElementById('respin-btn');
+  const freezeBtn = document.getElementById('freeze-btn');
+  const squadStarChipsEl = document.getElementById('squad-star-chips-count');
+  const squadActiveTotalEl = document.getElementById('squad-active-total');
+  const squadBudgetCapEl = document.getElementById('squad-budget-cap');
+  const squadRosterEl = document.getElementById('squad-roster');
+  const squadBenchEl = document.getElementById('squad-bench');
+  const increaseCapBtn = document.getElementById('increase-cap-btn');
   const mapCanvasEl = document.getElementById('map-canvas');
   const mapPathsEl = document.getElementById('map-paths');
   const turnPanelEl = document.getElementById('turn-panel');
@@ -1240,9 +1325,12 @@
   // ---------- Screens ----------
 
   function showScreen(name) {
+    titleScreenEl.classList.toggle('hidden', name !== 'title');
     homeScreenEl.classList.toggle('hidden', name !== 'home');
     mapScreenEl.classList.toggle('hidden', name !== 'map');
     draftScreenEl.classList.toggle('hidden', name !== 'draft');
+    recruitScreenEl.classList.toggle('hidden', name !== 'recruit');
+    squadScreenEl.classList.toggle('hidden', name !== 'squad');
     gameContainerEl.classList.toggle('hidden', name !== 'battle');
   }
 
@@ -1274,20 +1362,41 @@
 
   function renderHomeScreen() {
     document.getElementById('star-chips-count').textContent = starChips;
+    document.getElementById('budget-cap-count').textContent = budgetCap;
   }
 
   function returnToHomeBase() {
     pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
+    if (recruitPoolFrozen) {
+      recruitPoolFrozen = false;
+    } else {
+      recruitPool = generateRecruitPool();
+    }
     showScreen('home');
     renderHomeScreen();
+  }
+
+  // The very first draft of a run: no mission/AI opponent yet, just picking the
+  // starting squad within budget. Confirming it (see confirmTeam) saves the pick
+  // as the active roster and drops the player at home base, rather than previewing
+  // an enemy team and heading into a battle.
+  function startInitialDraft() {
+    resetBattleAndDraftState();
+    currentNode = null;
+    showScreen('draft');
+    missionIndicatorEl.style.display = 'none';
+    redraftBtn.style.display = 'none';
+    budgetMeterEl.style.display = '';
+    renderUnitGrid();
   }
 
   function enterDraftForNode(node) {
     resetBattleAndDraftState();
     currentNode = node;
     showScreen('draft');
+    missionIndicatorEl.style.display = '';
     renderMissionIndicator();
 
     if (activeRoster.length === 0) {
@@ -1327,6 +1436,8 @@
     });
   }
 
+  startGameBtn.addEventListener('click', startInitialDraft);
+
   deployBtn.addEventListener('click', () => {
     renderMap();
     showScreen('map');
@@ -1353,6 +1464,8 @@
   let activeRoster = [];
   let bench = [];
   let starChips = 0;
+  const DRAFT_BUDGET = 10;
+  let budgetCap = DRAFT_BUDGET; // raised via home base's "Increase Budget Cap"
 
   // Unit death is permanent: any player-team battlefield unit still marked dead when the
   // battle screen is left (win, loss, or mid-fight retreat) is stripped from the owned
@@ -1367,9 +1480,188 @@
     bench = bench.filter(e => !deadIds.has(e.rosterId));
   }
 
+  // ---------- Recruit ----------
+  // A batch of 5 recruit slots, each holding a unit id or null once bought. Slots
+  // don't instantly backfill on purchase — the batch only fully refreshes on a paid
+  // respin or for free the next time the player returns from a resolved encounter
+  // (unless the batch was frozen, which shields it from exactly that one refresh).
+
+  const RESPIN_COST = 3;
+  const FREEZE_COST = 3;
+  const RECRUIT_MARKUP = 2;
+
+  function generateRecruitPool() {
+    const ids = Object.keys(UNIT_DATABASE);
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    return ids.slice(0, 5);
+  }
+
+  let recruitPool = generateRecruitPool();
+  let recruitPoolFrozen = false;
+
+  function recruitCost(unitId) {
+    return UNIT_DATABASE[unitId].cost + RECRUIT_MARKUP;
+  }
+
+  function renderRecruitScreen() {
+    recruitStarChipsEl.textContent = starChips;
+
+    recruitGridEl.innerHTML = recruitPool.map((id, slot) => {
+      if (id == null) {
+        return '<div class="unit-card empty-slot">RECRUITED — REFRESHES LATER</div>';
+      }
+      const u = UNIT_DATABASE[id];
+      const price = recruitCost(id);
+      const affordable = starChips >= price;
+      const classes = ['unit-card'];
+      if (!affordable) classes.push('disabled');
+      return (
+        '<div class="' + classes.join(' ') + '" data-slot="' + slot + '">' +
+          '<div class="unit-card-inner">' +
+            '<img class="unit-card-thumb" src="' + spritePath(id) + '" alt="">' +
+            '<div class="unit-card-body">' +
+              '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + price + '</span></div>' +
+              '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+              '<div class="unit-card-stats">' +
+                '<span>HP ' + u.hp + '</span><span>ATK ' + u.atk + '</span><span>MOV ' + u.move + '</span><span>RNG ' + u.range + '</span>' +
+              '</div>' +
+              '<div class="unit-card-effect">' + u.effect + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    respinBtn.disabled = starChips < RESPIN_COST;
+    freezeBtn.disabled = recruitPoolFrozen || starChips < FREEZE_COST;
+    freezeBtn.textContent = recruitPoolFrozen ? 'FROZEN' : 'FREEZE (' + FREEZE_COST + ')';
+  }
+
+  recruitGridEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card || card.classList.contains('disabled') || card.classList.contains('empty-slot')) return;
+    const slot = Number(card.dataset.slot);
+    const id = recruitPool[slot];
+    const price = recruitCost(id);
+    if (starChips < price) return;
+    starChips -= price;
+    bench.push(makeRosterEntry(id));
+    recruitPool[slot] = null;
+    renderRecruitScreen();
+  });
+
+  respinBtn.addEventListener('click', () => {
+    if (starChips < RESPIN_COST) return;
+    starChips -= RESPIN_COST;
+    recruitPool = generateRecruitPool();
+    recruitPoolFrozen = false;
+    renderRecruitScreen();
+  });
+
+  freezeBtn.addEventListener('click', () => {
+    if (recruitPoolFrozen || starChips < FREEZE_COST) return;
+    starChips -= FREEZE_COST;
+    recruitPoolFrozen = true;
+    renderRecruitScreen();
+  });
+
+  recruitBtn.addEventListener('click', () => {
+    showScreen('recruit');
+    renderRecruitScreen();
+  });
+
+  recruitBackBtn.addEventListener('click', () => {
+    showScreen('home');
+    renderHomeScreen();
+  });
+
+  // ---------- Manage Squad ----------
+
+  function activeRosterTotal() {
+    return activeRoster.reduce((sum, e) => sum + UNIT_DATABASE[e.unitId].cost, 0);
+  }
+
+  function squadCardHtml(entry, extraClass) {
+    const u = UNIT_DATABASE[entry.unitId];
+    const classes = ['unit-card'];
+    if (extraClass) classes.push(extraClass);
+    return (
+      '<div class="' + classes.join(' ') + '" data-roster-id="' + entry.rosterId + '">' +
+        '<div class="unit-card-inner">' +
+          '<img class="unit-card-thumb" src="' + spritePath(entry.unitId) + '" alt="">' +
+          '<div class="unit-card-body">' +
+            '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
+            '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderSquadScreen() {
+    const activeTotal = activeRosterTotal();
+    squadStarChipsEl.textContent = starChips;
+    squadActiveTotalEl.textContent = activeTotal;
+    squadBudgetCapEl.textContent = budgetCap;
+
+    squadRosterEl.innerHTML = activeRoster.map(e => squadCardHtml(e)).join('')
+      || '<div class="empty-hint">No units on active roster.</div>';
+
+    squadBenchEl.innerHTML = bench.map(e => {
+      const fits = activeTotal + UNIT_DATABASE[e.unitId].cost <= budgetCap;
+      return squadCardHtml(e, fits ? '' : 'disabled');
+    }).join('') || '<div class="empty-hint">Bench is empty.</div>';
+
+    const capCost = budgetCap * 2;
+    increaseCapBtn.textContent = 'INCREASE BUDGET CAP (' + capCost + ')';
+    increaseCapBtn.disabled = starChips < capCost;
+  }
+
+  squadRosterEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card) return;
+    const rid = Number(card.dataset.rosterId);
+    const idx = activeRoster.findIndex(e => e.rosterId === rid);
+    if (idx === -1) return;
+    const [entry] = activeRoster.splice(idx, 1);
+    bench.push(entry);
+    renderSquadScreen();
+  });
+
+  squadBenchEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card || card.classList.contains('disabled')) return;
+    const rid = Number(card.dataset.rosterId);
+    const idx = bench.findIndex(e => e.rosterId === rid);
+    if (idx === -1) return;
+    const [entry] = bench.splice(idx, 1);
+    activeRoster.push(entry);
+    renderSquadScreen();
+  });
+
+  increaseCapBtn.addEventListener('click', () => {
+    const capCost = budgetCap * 2;
+    if (starChips < capCost) return;
+    starChips -= capCost;
+    budgetCap += 1;
+    renderSquadScreen();
+  });
+
+  manageSquadBtn.addEventListener('click', () => {
+    showScreen('squad');
+    renderSquadScreen();
+  });
+
+  squadBackBtn.addEventListener('click', () => {
+    showScreen('home');
+    renderHomeScreen();
+  });
+
   // ---------- Draft ----------
 
-  const DRAFT_BUDGET = 10;
   let selectedPlayerUnits = [];
   let confirmedAiTeam = [];
 
@@ -1408,7 +1700,7 @@
   }
 
   function renderUnitGrid() {
-    const remaining = DRAFT_BUDGET - playerSpent();
+    const remaining = budgetCap - playerSpent();
     budgetRemainingEl.textContent = remaining;
 
     unitGridEl.innerHTML = Object.keys(UNIT_DATABASE).map(id => {
@@ -1445,14 +1737,14 @@
     if (selectedPlayerUnits.includes(id)) {
       selectedPlayerUnits = selectedPlayerUnits.filter(u => u !== id);
     } else {
-      const remaining = DRAFT_BUDGET - playerSpent();
+      const remaining = budgetCap - playerSpent();
       if (UNIT_DATABASE[id].cost > remaining) return;
       selectedPlayerUnits.push(id);
     }
     renderUnitGrid();
   });
 
-  function rosterHtml(label, teamIds, budget = DRAFT_BUDGET) {
+  function rosterHtml(label, teamIds, budget = budgetCap) {
     const total = teamIds.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
     const rows = teamIds.map(id => {
       const u = UNIT_DATABASE[id];
@@ -1466,9 +1758,17 @@
   }
 
   function confirmTeam() {
+    if (currentNode == null) {
+      // Initial squad draft: no enemy to preview, just bank the pick and head to base.
+      activeRoster = selectedPlayerUnits.map(makeRosterEntry);
+      showScreen('home');
+      renderHomeScreen();
+      return;
+    }
+
     confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
-      rosterHtml('YOUR TEAM', selectedPlayerUnits, DRAFT_BUDGET) +
+      rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
       rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
@@ -1649,7 +1949,7 @@
 
   beginBattleBtn.addEventListener('click', beginBattle);
 
-  renderHomeScreen();
+  showScreen('title');
 })();
 </script>
 </body>
