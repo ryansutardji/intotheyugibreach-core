@@ -228,6 +228,7 @@
   #title-screen,
   #home-screen,
   #gameover-screen,
+  #win-screen,
   #map-screen,
   #draft-screen,
   #recruit-screen,
@@ -245,6 +246,7 @@
   #title-screen.hidden,
   #home-screen.hidden,
   #gameover-screen.hidden,
+  #win-screen.hidden,
   #map-screen.hidden,
   #draft-screen.hidden,
   #recruit-screen.hidden,
@@ -253,12 +255,16 @@
 
   #title-screen .subtitle,
   #home-screen .subtitle,
-  #gameover-screen .subtitle {
+  #gameover-screen .subtitle,
+  #win-screen .subtitle {
     text-align: center;
     font-size: 12px;
     color: #666a80;
     line-height: 1.6;
   }
+
+  #win-screen { border-color: #8bac0f; box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(139,172,15,0.35); }
+  #win-screen h1.title { color: #9bbc0f; }
 
   #map-canvas {
     position: relative;
@@ -487,6 +493,16 @@
   </div>
 </div>
 
+<div id="win-screen" class="hidden">
+  <h1 class="title">VICTORY</h1>
+  <div class="panel">
+    <div class="subtitle">Every mission on the map has been cleared — Domino City to the Shadow Realm. Yugibreach is complete.</div>
+  </div>
+  <div class="btn-row">
+    <button id="win-restart-btn" class="primary">START NEW RUN</button>
+  </div>
+</div>
+
 <div id="map-screen" class="hidden">
   <h1 class="title">SELECT A MISSION</h1>
   <div class="panel">
@@ -677,6 +693,8 @@
   const homeScreenEl = document.getElementById('home-screen');
   const gameoverScreenEl = document.getElementById('gameover-screen');
   const gameoverRestartBtn = document.getElementById('gameover-restart-btn');
+  const winScreenEl = document.getElementById('win-screen');
+  const winRestartBtn = document.getElementById('win-restart-btn');
   const mapScreenEl = document.getElementById('map-screen');
   const draftScreenEl = document.getElementById('draft-screen');
   const recruitScreenEl = document.getElementById('recruit-screen');
@@ -838,9 +856,10 @@
       bonus += 4 * alliesAdjacentTo(attacker).filter(a => a.monsterType === 'Beast').length;
     }
 
-    if (attacker.unitId === 'kaiser_sea_horse' || attacker.unitId === 'blue_eyes_white_dragon') {
-      const partnerId = attacker.unitId === 'kaiser_sea_horse' ? 'blue_eyes_white_dragon' : 'kaiser_sea_horse';
-      if (alliesAdjacentTo(attacker).some(a => a.unitId === partnerId)) bonus += 6;
+    if (attacker.unitId === 'kaiser_sea_horse') {
+      if (alliesAdjacentTo(attacker).some(a => a.monsterType === 'Dragon')) bonus += 6;
+    } else if (attacker.monsterType === 'Dragon') {
+      if (alliesAdjacentTo(attacker).some(a => a.unitId === 'kaiser_sea_horse')) bonus += 6;
     }
 
     if (attacker.unitId === 'dark_magician_girl') {
@@ -1385,6 +1404,7 @@
     titleScreenEl.classList.toggle('hidden', name !== 'title');
     homeScreenEl.classList.toggle('hidden', name !== 'home');
     gameoverScreenEl.classList.toggle('hidden', name !== 'gameover');
+    winScreenEl.classList.toggle('hidden', name !== 'win');
     mapScreenEl.classList.toggle('hidden', name !== 'map');
     draftScreenEl.classList.toggle('hidden', name !== 'draft');
     recruitScreenEl.classList.toggle('hidden', name !== 'recruit');
@@ -1452,6 +1472,23 @@
     showScreen('gameover');
   }
 
+  // Reached once every node in MAP_NODES has been cleared. Resets roster/bench
+  // like abandonRun (unlike triggerGameOver, which never needs to) so the win
+  // screen's restart button drops the player into a genuinely fresh run, and
+  // clears the save so a reload lands on the title screen instead of a stale
+  // fully-cleared map.
+  function triggerGameWin() {
+    activeRoster = [];
+    bench = [];
+    starChips = 0;
+    budgetCap = DRAFT_BUDGET;
+    recruitPool = generateRecruitPool();
+    recruitPoolFrozen = false;
+    clearedNodes = new Set();
+    clearSave();
+    showScreen('win');
+  }
+
   function returnToHomeBase() {
     // Only a win locks a node out — losing or retreating leaves it replayable.
     // This runs before resetBattleAndDraftState() clears currentNodeWon below.
@@ -1460,6 +1497,11 @@
     pruneDeadRosterEntries();
     resetBattleAndDraftState();
     currentNode = null;
+
+    if (clearedNodes.size === MAP_NODES.length) {
+      triggerGameWin();
+      return;
+    }
 
     if (activeRoster.length === 0 && bench.length === 0) {
       triggerGameOver();
@@ -1529,6 +1571,7 @@
 
   startGameBtn.addEventListener('click', startInitialDraft);
   gameoverRestartBtn.addEventListener('click', startInitialDraft);
+  winRestartBtn.addEventListener('click', startInitialDraft);
 
   deployBtn.addEventListener('click', () => {
     renderMap();

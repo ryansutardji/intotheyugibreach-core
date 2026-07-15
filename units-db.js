@@ -151,7 +151,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Sea Serpent',
     attribute: 'LIGHT',
-    effect: 'Gains +6 ATK while adjacent to Blue-Eyes White Dragon (and grants the same to it).',
+    effect: 'Gains +6 ATK while adjacent to any Dragon-type ally (and grants the same to it).',
   },
   kuriboh: {
     name: 'Kuriboh',

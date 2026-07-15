@@ -10,13 +10,13 @@
       about 10. Location names should stay within the pre-GX Yu-Gi-Oh era (original
       series / Duelist Kingdom / Battle City / Waking the Dragons, etc.) — same theming
       as the existing node names.
-- [ ] **Win condition**: clearing every node on the map (see the win-only node-lock in
+- [x] **Win condition**: clearing every node on the map (see the win-only node-lock in
       `clearedNodes`) should be treated as beating the game — needs an explicit
       win/completion screen rather than just leaving the player with a fully-cleared map.
 - [ ] **Act structure**: the current 10-ish node map is "Act 1." Set up the code (node
       data, map rendering, save data) so nodes are labeled/grouped by act now, with
       room to add Act 2, 3, 4+ later without another data-model rewrite.
-- [ ] **Kaiser Sea Horse rework**: broaden its effect in `units-db.js` from "adjacent to
+- [x] **Kaiser Sea Horse rework**: broaden its effect in `units-db.js` from "adjacent to
       Blue-Eyes White Dragon specifically" to "adjacent to any Dragon-type ally" (mutual
       +6 ATK), instead of naming one specific unit.
 - [ ] **Randomize the initial draft pool**: the starting draft screen currently offers
