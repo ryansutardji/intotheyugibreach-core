@@ -135,6 +135,30 @@
     margin-bottom: 4px;
   }
 
+  #mission-objective {
+    font-size: 10px;
+    color: #f0e68c;
+    letter-spacing: normal;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  #objective-status {
+    text-align: center;
+    font-size: 10px;
+    color: #f0e68c;
+    margin-top: 4px;
+  }
+
+  .objective-banner {
+    font-size: 11px;
+    color: #f0e68c;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px dotted #44445a;
+  }
+
   #unit-info {
     font-size: 12px;
     min-height: 216px;
@@ -312,6 +336,13 @@
   .map-node-budget {
     font-size: 10px;
     color: #f0e68c;
+  }
+
+  .map-node-objective {
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: #38bdf8;
+    margin-top: 3px;
   }
 
   #budget-meter {
@@ -545,7 +576,10 @@
   <h1 class="title">DRAFT YOUR TEAM</h1>
 
   <div class="panel">
-    <div id="mission-indicator">MISSION: <span id="mission-name">—</span> — BUDGET <span id="mission-budget">10</span></div>
+    <div id="mission-indicator">
+      MISSION: <span id="mission-name">—</span> — BUDGET <span id="mission-budget">10</span>
+      <div id="mission-objective"></div>
+    </div>
     <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
   </div>
 
@@ -584,6 +618,7 @@
     <div class="panel" id="turn-panel">
       <div id="turn-indicator" class="player">PLAYER TURN</div>
       <div id="round-counter">ROUND 1</div>
+      <div id="objective-status"></div>
     </div>
 
     <div class="panel">
@@ -617,6 +652,7 @@
       <div class="legend-note">Outline = team (blue outline = you, red outline = enemy).</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
       <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
+      <div class="legend-note">Mission objectives: yellow tile glow = a tile you must defend. Blue ring = your VIP unit — protect it. Yellow ring = the enemy's priority target — destroying it wins instantly.</div>
     </div>
   </div>
 </div>
@@ -681,6 +717,7 @@
   const ctx = canvas.getContext('2d');
   const turnIndicatorEl = document.getElementById('turn-indicator');
   const roundCounterEl = document.getElementById('round-counter');
+  const objectiveStatusEl = document.getElementById('objective-status');
   const unitInfoEl = document.getElementById('unit-info');
   const battleLogEl = document.getElementById('battle-log');
   const endTurnBtn = document.getElementById('end-turn-btn');
@@ -749,6 +786,97 @@
   // rest of the run. Losing or retreating does NOT clear a node. Reset on
   // triggerGameOver.
   let clearedNodes = new Set();
+
+  // ---------- Objectives ----------
+  // Each node gets a randomly rolled win/loss objective, decided once per run (see
+  // rollNodeObjectives, called from startInitialDraft) and kept for the rest of that
+  // run — a page reload restores it from the save rather than re-rolling. Keyed by
+  // node id: { type, ...params }. 'kill_all' is just one of the six equally-likely
+  // outcomes, not a fallback, though currentObjective() tolerates a missing entry
+  // (e.g. before a save has ever rolled objectives) by treating it as kill_all.
+  let nodeObjectives = {};
+
+  const OBJECTIVE_TYPES = [
+    'kill_all', 'protect_vip', 'defend_tile', 'survive_rounds', 'eliminate_target', 'timed_clear',
+  ];
+
+  function buildObjective(type, node) {
+    switch (type) {
+      case 'defend_tile':
+        // Planted on the player's side of the board so every enemy has to cross the
+        // whole map to reach it, giving the telegraph system room to warn about it
+        // several turns out.
+        return { type, x: Math.random() < 0.5 ? 0 : 1, y: Math.floor(Math.random() * GRID) };
+      case 'survive_rounds':
+        return { type, rounds: Math.max(4, Math.round(node.budget * 0.6)) };
+      case 'timed_clear':
+        return { type, rounds: Math.max(5, Math.round(node.budget * 0.8)) };
+      default:
+        return { type };
+    }
+  }
+
+  function rollNodeObjectives() {
+    const objectives = {};
+    MAP_NODES.forEach(node => {
+      const type = OBJECTIVE_TYPES[Math.floor(Math.random() * OBJECTIVE_TYPES.length)];
+      objectives[node.id] = buildObjective(type, node);
+    });
+    nodeObjectives = objectives;
+  }
+
+  function currentObjective() {
+    if (!currentNode) return null;
+    return nodeObjectives[currentNode.id] || { type: 'kill_all' };
+  }
+
+  function objectiveLabel(obj) {
+    switch (obj.type) {
+      case 'protect_vip': return 'PROTECT';
+      case 'defend_tile': return 'DEFEND';
+      case 'survive_rounds': return 'SURVIVE ' + obj.rounds;
+      case 'eliminate_target': return 'ELIMINATE';
+      case 'timed_clear': return 'CLEAR IN ' + obj.rounds;
+      default: return 'ELIMINATE ALL';
+    }
+  }
+
+  function objectiveDescription(obj) {
+    switch (obj.type) {
+      case 'protect_vip':
+        return 'PROTECT: one unit in your squad, chosen at random when the battle begins, must survive — losing it ends the mission in defeat no matter what else survives.';
+      case 'defend_tile':
+        return 'DEFEND: tile (' + obj.x + ', ' + obj.y + ') must never be reached by an enemy. The instant one lands there, the mission ends in defeat.';
+      case 'survive_rounds':
+        return 'SURVIVE: hold out for ' + obj.rounds + ' rounds. You win the moment you reach it, even with enemies still standing.';
+      case 'eliminate_target':
+        return "ELIMINATE: the enemy's priority target (marked on the field) must die — destroying it wins the mission instantly, regardless of the rest of their team.";
+      case 'timed_clear':
+        return 'CLEAR: eliminate every enemy within ' + obj.rounds + ' rounds, or the mission ends in defeat even if your squad is untouched.';
+      default:
+        return 'ELIMINATE ALL: destroy every enemy unit to win.';
+    }
+  }
+
+  function objectiveVictoryText(obj) {
+    switch (obj.type) {
+      case 'protect_vip': return 'The VIP made it out alive.';
+      case 'defend_tile': return 'The line held.';
+      case 'survive_rounds': return 'You outlasted them.';
+      case 'eliminate_target': return 'The priority target is down.';
+      case 'timed_clear': return 'Cleared with time to spare.';
+      default: return '';
+    }
+  }
+
+  function objectiveDefeatText(obj) {
+    switch (obj.type) {
+      case 'protect_vip': return 'The VIP has fallen';
+      case 'defend_tile': return 'The line broke';
+      case 'timed_clear': return 'Time ran out';
+      default: return 'Your squad has fallen';
+    }
+  }
 
   let selectedUnit = null;
   let reachableTiles = [];
@@ -983,9 +1111,39 @@
 
   function checkGameOver() {
     const playerAlive = units.some(u => u.team === 'player' && u.alive);
+    if (!playerAlive) { endGame(false); return true; }
+
+    // Objective-specific win/loss checks layer on top of the two universal ones
+    // below — killing every enemy is always a valid win regardless of objective
+    // type, and losing your whole squad is always a loss.
+    const obj = currentObjective();
+    if (obj) {
+      if (obj.type === 'protect_vip') {
+        const vip = units.find(u => u.isVIP);
+        if (vip && !vip.alive) { endGame(false); return true; }
+      }
+      if (obj.type === 'eliminate_target') {
+        const target = units.find(u => u.isPriorityTarget);
+        if (target && !target.alive) { endGame(true); return true; }
+      }
+    }
+
     const enemyAlive = units.some(u => u.team === 'enemy' && u.alive);
     if (!enemyAlive) { endGame(true); return true; }
-    if (!playerAlive) { endGame(false); return true; }
+    return false;
+  }
+
+  // Defend-the-tile is tile-locked, not checked in checkGameOver: an enemy landing
+  // on the guarded tile ends the battle the instant its move resolves, during
+  // startEnemyTurn's execution loop, rather than via a unit-alive predicate.
+  function checkTileBreach(unit) {
+    const obj = currentObjective();
+    if (!obj || obj.type !== 'defend_tile' || gameOver) return false;
+    if (unit.x === obj.x && unit.y === obj.y) {
+      log(labelOf(unit) + ' reaches the guarded tile!');
+      endGame(false);
+      return true;
+    }
     return false;
   }
 
@@ -999,15 +1157,18 @@
     bannerEl.classList.toggle('victory', victory);
     bannerEl.classList.toggle('defeat', !victory);
 
+    const obj = currentObjective() || { type: 'kill_all' };
+
     if (victory) {
       bannerTextEl.textContent = 'VICTORY';
-      bannerSubEl.textContent = currentNode.name + ' secured.';
+      const victoryPrefix = objectiveVictoryText(obj);
+      bannerSubEl.textContent = (victoryPrefix ? victoryPrefix + ' ' : '') + currentNode.name + ' secured.';
       starChips += currentNode.budget;
       bannerSubEl.textContent += ' +' + currentNode.budget + ' Star Chips earned.';
       currentNodeWon = true;
     } else {
       bannerTextEl.textContent = 'DEFEAT';
-      bannerSubEl.textContent = 'Your squad has fallen at ' + currentNode.name + '.';
+      bannerSubEl.textContent = objectiveDefeatText(obj) + ' at ' + currentNode.name + '.';
     }
 
     awardUnitXp();
@@ -1160,12 +1321,41 @@
   // planning finishes) so that later enemies' pathing and targeting account for
   // earlier enemies' planned positions — matching how they'd actually see the board
   // once the turn plays out for real.
+  // Every enemy attacks after moving, even with nobody in range — it just swings at
+  // an empty tile instead. Since strikes are tile-locked, that still telegraphs as a
+  // real threat: stepping onto that tile yourself walks you into the hit. Never picks
+  // a tile currently held by another enemy.
+  function pickBlankStrikeTile(unit) {
+    const candidates = [];
+    for (let dx = -unit.range; dx <= unit.range; dx++) {
+      for (let dy = -unit.range; dy <= unit.range; dy++) {
+        const dist = Math.abs(dx) + Math.abs(dy);
+        if (dist === 0 || dist > unit.range) continue;
+        const x = unit.x + dx, y = unit.y + dy;
+        if (x < 0 || x >= GRID || y < 0 || y >= GRID) continue;
+        const occupant = unitAt(x, y);
+        if (occupant && occupant.team === unit.team) continue;
+        candidates.push({ x, y });
+      }
+    }
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   function planEnemyTurn() {
     const enemyUnits = units.filter(u => u.team === 'enemy' && u.alive);
     const plan = [];
 
+    // defend_tile has no unit to chase, so without this the AI would only ever
+    // wander near the guarded tile by coincidence (e.g. while pathing toward a
+    // player unit that happens to be nearby). Appending it as an extra target lets
+    // chooseAIMove's existing nearest-target logic pull enemies toward it too,
+    // competing with player units exactly like a real threat would.
+    const obj = currentObjective();
+    const tileLure = (obj && obj.type === 'defend_tile') ? [{ x: obj.x, y: obj.y }] : [];
+
     for (const unit of enemyUnits) {
-      const targets = units.filter(u => u.team === 'player' && u.alive);
+      const targets = units.filter(u => u.team === 'player' && u.alive).concat(tileLure);
       if (targets.length === 0) break;
 
       const isRetreat = unit.hp / unit.maxHp < 0.3;
@@ -1187,11 +1377,17 @@
         let attacksLeft = attacksPerTurn(unit);
         while (attacksLeft > 0) {
           const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
-          if (inRange.length === 0) break;
-          inRange.sort((a, b) => a.hp - b.hp);
-          const primary = inRange[0];
-          primaryStrikeTiles.push({ x: primary.x, y: primary.y });
-          getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
+          if (inRange.length > 0) {
+            inRange.sort((a, b) => a.hp - b.hp);
+            const primary = inRange[0];
+            primaryStrikeTiles.push({ x: primary.x, y: primary.y });
+            getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
+          } else {
+            const blank = pickBlankStrikeTile(unit);
+            if (!blank) break; // boxed in by allies on every tile in range — nothing legal to hit
+            primaryStrikeTiles.push(blank);
+            previewStrikeTiles.push(blank);
+          }
           attacksLeft -= 1;
         }
       }
@@ -1256,6 +1452,8 @@
       }
       render();
 
+      if (checkTileBreach(unit)) { aiRunning = false; return; }
+
       await delay(350);
 
       if (!entry.isRetreat) {
@@ -1299,6 +1497,14 @@
     turnIndicatorEl.className = 'player';
     roundCounterEl.textContent = 'ROUND ' + round;
     endTurnBtn.disabled = false;
+
+    // Round-threshold objectives resolve here, the moment the round they're counting
+    // toward actually begins — survive_rounds wins outright even with enemies still
+    // on the field; timed_clear loses outright even with the player's squad intact.
+    const obj = currentObjective();
+    if (obj && obj.type === 'survive_rounds' && round > obj.rounds) { endGame(true); return; }
+    if (obj && obj.type === 'timed_clear' && round > obj.rounds) { endGame(false); return; }
+
     enemyPlan = planEnemyTurn();
     render();
   }
@@ -1425,6 +1631,8 @@
       [6, 7].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
     }
 
+    if (phase === 'battle' || phase === 'placement') drawObjectiveTileMarker();
+
     if (selectedUnit && !gameOver) {
       ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
       reachableTiles.forEach(t => {
@@ -1472,11 +1680,82 @@
 
       ctx.restore();
     });
+
+    drawObjectiveUnitMarkers();
+  }
+
+  // Guarded-tile glow for the defend_tile objective — drawn early, same layer as the
+  // reachable-tile/telegraph overlays, so units standing on it stay fully visible.
+  function drawObjectiveTileMarker() {
+    const obj = currentObjective();
+    if (!obj || obj.type !== 'defend_tile') return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
+    ctx.fillRect(obj.x * TILE, obj.y * TILE, TILE, TILE);
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(obj.x * TILE + 4, obj.y * TILE + 4, TILE - 8, TILE - 8);
+    ctx.restore();
+  }
+
+  // VIP / priority-target rings, drawn last so they sit on top of unit sprites and
+  // HP bars rather than being covered by them.
+  function drawObjectiveUnitMarkers() {
+    units.filter(u => u.alive && (u.isVIP || u.isPriorityTarget)).forEach(u => {
+      const cx = u.x * TILE + TILE / 2;
+      const cy = u.y * TILE + TILE / 2;
+      ctx.save();
+      ctx.strokeStyle = u.isVIP ? '#38bdf8' : '#facc15';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 27, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
   }
 
   function render() {
     draw();
     updateUnitInfo();
+    renderObjectiveStatus();
+  }
+
+  // Live objective status shown in the turn panel throughout the fight — the same
+  // role unit HP bars play for individual units, but for the mission as a whole.
+  function renderObjectiveStatus() {
+    if (phase !== 'battle' || !objectiveStatusEl) return;
+    const obj = currentObjective();
+    if (!obj) { objectiveStatusEl.textContent = ''; return; }
+
+    switch (obj.type) {
+      case 'protect_vip': {
+        const vip = units.find(u => u.isVIP);
+        objectiveStatusEl.textContent = vip
+          ? 'PROTECT: ' + vip.name + ' — ' + Math.max(0, vip.hp) + '/' + vip.maxHp + ' HP'
+          : 'PROTECT';
+        break;
+      }
+      case 'defend_tile':
+        objectiveStatusEl.textContent = 'DEFEND: tile (' + obj.x + ', ' + obj.y + ')';
+        break;
+      case 'survive_rounds':
+        objectiveStatusEl.textContent = 'SURVIVE: round ' + Math.min(round, obj.rounds) + ' / ' + obj.rounds;
+        break;
+      case 'eliminate_target': {
+        const target = units.find(u => u.isPriorityTarget);
+        objectiveStatusEl.textContent = (target && target.alive)
+          ? 'ELIMINATE: ' + target.name + ' — ' + Math.max(0, target.hp) + '/' + target.maxHp + ' HP'
+          : 'ELIMINATE: priority target down';
+        break;
+      }
+      case 'timed_clear':
+        objectiveStatusEl.textContent = 'CLEAR: round ' + round + ' / ' + obj.rounds;
+        break;
+      default:
+        objectiveStatusEl.textContent = 'ELIMINATE ALL ENEMIES';
+    }
   }
 
   function statsHtml(u) {
@@ -1496,7 +1775,9 @@
       '<div class="stat-row"><span>ATK</span><span>' + u.atk + '</span></div>' +
       '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
       '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>' +
-      '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>'
+      '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>' +
+      (u.isVIP ? '<div class="unit-effect" style="color:#38bdf8;">VIP — protect this unit at all costs. Losing it ends the mission in defeat.</div>' : '') +
+      (u.isPriorityTarget ? '<div class="unit-effect" style="color:#facc15;">PRIORITY TARGET — destroying this unit wins the mission instantly.</div>' : '')
     );
   }
 
@@ -1682,6 +1963,7 @@
   function startInitialDraft() {
     resetBattleAndDraftState();
     currentNode = null;
+    rollNodeObjectives();
     showScreen('draft');
     missionIndicatorEl.style.display = 'none';
     redraftBtn.style.display = 'none';
@@ -1720,7 +2002,8 @@
       el.style.top = node.y + '%';
       el.innerHTML =
         '<div class="map-node-name">' + node.name + '</div>' +
-        '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>';
+        '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
+        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
       if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
       mapCanvasEl.appendChild(el);
     });
@@ -1885,6 +2168,7 @@
       recruitPool,
       recruitPoolFrozen,
       clearedNodes: [...clearedNodes],
+      nodeObjectives,
     }));
   }
 
@@ -1907,6 +2191,13 @@
       recruitPool = data.recruitPool;
       recruitPoolFrozen = data.recruitPoolFrozen;
       clearedNodes = new Set(data.clearedNodes || []);
+      // Older saves predate objectives entirely — roll fresh rather than leaving
+      // every node without one.
+      if (data.nodeObjectives && Object.keys(data.nodeObjectives).length) {
+        nodeObjectives = data.nodeObjectives;
+      } else {
+        rollNodeObjectives();
+      }
       return true;
     } catch (e) {
       clearSave();
@@ -2097,6 +2388,7 @@
   const redraftBtn = document.getElementById('redraft-btn');
   const missionNameEl = document.getElementById('mission-name');
   const missionBudgetEl = document.getElementById('mission-budget');
+  const missionObjectiveEl = document.getElementById('mission-objective');
 
   function playerSpent() {
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
@@ -2119,6 +2411,7 @@
   function renderMissionIndicator() {
     missionNameEl.textContent = currentNode.name;
     missionBudgetEl.textContent = currentNode.budget;
+    missionObjectiveEl.textContent = objectiveDescription(currentObjective());
   }
 
   function renderUnitGrid() {
@@ -2191,6 +2484,7 @@
 
     confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
+      '<div class="objective-banner">' + objectiveDescription(currentObjective()) + '</div>' +
       rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
       rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
     pickerPanelEl.style.display = 'none';
@@ -2261,6 +2555,18 @@
     hoveredTile = null;
 
     placeAITeam(confirmedAiTeam);
+
+    // eliminate_target flags the drafted enemy team's costliest unit (its "ace") as
+    // the priority target — decided here, not at objective-roll time, since the
+    // enemy roster itself isn't known until the node is actually drafted.
+    const obj = currentObjective();
+    if (obj && obj.type === 'eliminate_target') {
+      const enemies = units.filter(u => u.team === 'enemy' && u.alive);
+      const maxCost = Math.max(...enemies.map(u => u.cost));
+      const candidates = enemies.filter(u => u.cost === maxCost);
+      candidates[Math.floor(Math.random() * candidates.length)].isPriorityTarget = true;
+    }
+
     renderLegend();
 
     showScreen('battle');
@@ -2362,8 +2668,18 @@
     turnIndicatorEl.className = 'player';
     roundCounterEl.textContent = 'ROUND ' + round;
 
+    // protect_vip flags one already-placed player unit at random — decided here,
+    // right as the battle actually starts, rather than at objective-roll time.
+    const obj = currentObjective();
+    if (obj && obj.type === 'protect_vip') {
+      const playerUnits = units.filter(u => u.team === 'player' && u.alive);
+      if (playerUnits.length) {
+        playerUnits[Math.floor(Math.random() * playerUnits.length)].isVIP = true;
+      }
+    }
+
     battleLogEl.innerHTML = '';
-    log('Battle begins! Eliminate all enemy units to win.');
+    log('Battle begins! ' + objectiveDescription(obj || { type: 'kill_all' }));
     enemyPlan = planEnemyTurn();
     render();
   }

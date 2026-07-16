@@ -21,7 +21,7 @@ meant to be done **in this order** — each one's payoff depends on the previous
 existing (terrain/knockback is only satisfying if you can see the threat coming first;
 objective tiles only create tension if you can see what's about to hit them).
 
-- [ ] **Telegraph enemy intent**: show each living enemy's planned move-destination
+- [x] **Telegraph enemy intent**: show each living enemy's planned move-destination
       and attack target at the start of the player's turn, instead of the AI deciding
       and executing blind inside `startEnemyTurn` (index.html:1143). Highest-value,
       lowest-cost change of the three — do this first.
@@ -87,22 +87,31 @@ objective tiles only create tension if you can see what's about to hit them).
       not just its budget number — gives the map real variety, since every node
       today is the same empty 8x8 checkerboard.
 
-- [ ] **Objective-based win conditions**: add a "protect" win/loss mode alongside the
-      current kill-all-enemies condition (`checkGameOver`, index.html:975), so some
-      nodes are about damage control instead of pure attrition. Best done after
-      telegraphing exists — seeing "the enemy is about to reach the tile I need to
-      protect" is the point; without visible intent, protection is just another HP
-      pool to manage blind.
-    - Data: a `protect` field on applicable `MAP_NODES` entries — either specific
-      board tiles or a scripted defended unit/objective.
-    - Loss condition: losing the objective (tile destroyed, protected unit killed, or
-      an enemy reaching a tile) ends the battle in defeat even if player units are
-      still alive — needs a new check alongside the existing `!playerAlive` branch in
-      `checkGameOver`.
-    - UI: surface what's at risk (distinct highlight for protected tiles/units, a
-      remaining-objective-HP indicator if applicable) so the stakes are visible going
-      into each turn, the same way unit HP bars work today.
-    - Natural pairing with the not-yet-built boss-node item above — a boss node is a
-      good first place to introduce "don't let it reach the shrine" instead of pure
-      kill-all, since it's already a scripted one-off encounter rather than a
-      randomly drafted AI team.
+- [x] **Objective-based win conditions**: six win/loss modes beyond plain
+      kill-all-enemies, randomly assigned across all 10 map nodes each run (kill-all
+      included as just one of the six, not a fallback) via `rollNodeObjectives()`,
+      persisted through `saveGame`/`loadGame` alongside `clearedNodes` so a reload
+      doesn't re-roll them.
+        - *Kill All Enemies* — unchanged baseline.
+        - *Protect the VIP* — one already-placed unit from the player's own squad is
+          flagged at random when `beginBattle()` runs (not a separate scripted NPC —
+          simpler, and reuses the existing roster). Losing it is defeat regardless of
+          the rest of the squad.
+        - *Defend the Tile* — a board square rolled in the player's deployment zone;
+          instant defeat the moment an enemy's move lands it there (`checkTileBreach`,
+          called from `startEnemyTurn` right after each move resolves). Enemies also
+          treat the tile as an extra pathing target in `planEnemyTurn` (alongside
+          player units), since without that they'd only ever reach it by coincidence.
+        - *Survive N Rounds* / *Turn-Limited Clear* — a round threshold scaled off
+          node budget, checked in `startPlayerTurn` right after `round` increments;
+          survive wins automatically past the threshold, timed-clear loses
+          automatically past it if enemies remain.
+        - *Eliminate the Priority Target* — the drafted enemy team's highest-cost unit
+          is flagged in `enterPlacementPhase` right after `placeAITeam`; killing it
+          ends the battle in victory instantly via an additive check in
+          `checkGameOver`, independent of the rest of the enemy team.
+    - UI: objective badges on map node cards (`renderMap`), full description on the
+      draft/preview screen (`renderMissionIndicator`, `confirmTeam`), live status in
+      the battle turn panel (`renderObjectiveStatus`), board markers (guarded-tile
+      glow, VIP/priority-target rings in `draw()`), and objective-aware victory/defeat
+      banner text in `endGame`.
