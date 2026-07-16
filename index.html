@@ -143,6 +143,14 @@
     line-height: 1.5;
   }
 
+  #mission-hazard {
+    font-size: 10px;
+    color: #a78bfa;
+    letter-spacing: normal;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
   #objective-status {
     text-align: center;
     font-size: 10px;
@@ -153,6 +161,15 @@
   .objective-banner {
     font-size: 11px;
     color: #f0e68c;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px dotted #44445a;
+  }
+
+  .hazard-banner {
+    font-size: 11px;
+    color: #a78bfa;
     line-height: 1.5;
     margin-bottom: 10px;
     padding-bottom: 10px;
@@ -344,6 +361,13 @@
     letter-spacing: 1px;
     color: #38bdf8;
     margin-top: 3px;
+  }
+
+  .map-node-hazards {
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: #a78bfa;
+    margin-top: 2px;
   }
 
   #budget-meter {
@@ -580,6 +604,7 @@
     <div id="mission-indicator">
       MISSION: <span id="mission-name">—</span> — BUDGET <span id="mission-budget">10</span>
       <div id="mission-objective"></div>
+      <div id="mission-hazard"></div>
     </div>
     <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
   </div>
@@ -654,6 +679,7 @@
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
       <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
       <div class="legend-note">Mission objectives: yellow tile glow = a tile you must defend. Blue ring = your VIP unit — protect it. Yellow ring = the enemy's priority target — destroying it wins instantly.</div>
+      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Some heavy melee units can shove an adjacent enemy back a tile on hit; a purple arrow in the telegraph shows where that shove will land.</div>
     </div>
   </div>
 </div>
@@ -831,6 +857,93 @@
     return nodeObjectives[currentNode.id] || { type: 'kill_all' };
   }
 
+  // ---------- Hazards ----------
+  // Each node gets a randomly rolled set of hazard (pit) tiles, decided once per run
+  // (see rollNodeHazards, called from startInitialDraft alongside rollNodeObjectives)
+  // and kept for the rest of that run — a page reload restores it from the save
+  // rather than re-rolling. Keyed by node id: array of tile descriptors
+  // { x, y, type: 'pit', impassable, lethalOnEntry }. Behavior is driven by the
+  // impassable/lethalOnEntry flags rather than branching on type, so future hazard
+  // types/properties (damageOnEntry, slowsMovement, ...) can be added without
+  // touching pathing/combat code.
+  let nodeHazards = {};
+
+  function currentHazards() {
+    if (!currentNode) return [];
+    return nodeHazards[currentNode.id] || [];
+  }
+
+  // Hazards only ever roll into the middle four columns — never the player's
+  // deployment columns (PLAYER_ZONE_X, [0,1]) or the enemy's (AI_FRONT_X/AI_BACK_X,
+  // 6/7) — so no placement code needs to know hazards exist at all.
+  const HAZARD_COLUMNS = [2, 3, 4, 5];
+
+  // Movement is 4-directional only (see bfsReachable), so a fully-blocked column
+  // would permanently disconnect the player's side from the enemy's side for any
+  // ground unit. This checks that at least one path still exists between the two
+  // sides before a hazard layout is accepted.
+  function hazardsKeepBoardConnected(hazardSet) {
+    const start = [];
+    for (let y = 0; y < GRID; y++) start.push({ x: 1, y });
+    const visited = new Set(start.map(t => t.x + ',' + t.y));
+    const queue = start.slice();
+    let reachedEnemySide = false;
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur.x === 6) { reachedEnemySide = true; break; }
+      const neighbors = [
+        { x: cur.x + 1, y: cur.y }, { x: cur.x - 1, y: cur.y },
+        { x: cur.x, y: cur.y + 1 }, { x: cur.x, y: cur.y - 1 },
+      ];
+      for (const n of neighbors) {
+        if (n.x < 0 || n.x >= GRID || n.y < 0 || n.y >= GRID) continue;
+        const key = n.x + ',' + n.y;
+        if (visited.has(key) || hazardSet.has(key)) continue;
+        visited.add(key);
+        queue.push(n);
+      }
+    }
+    return reachedEnemySide;
+  }
+
+  function rollHazardsForNode(node) {
+    const pool = [];
+    HAZARD_COLUMNS.forEach(x => {
+      for (let y = 0; y < GRID; y++) pool.push({ x, y });
+    });
+    const count = Math.min(5, Math.max(1, Math.round(node.budget / 3)));
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const n = Math.max(0, count - Math.floor(attempt / 10));
+      const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+      const chosen = shuffled.slice(0, n);
+      const hazardSet = new Set(chosen.map(t => t.x + ',' + t.y));
+      if (n === 0 || hazardsKeepBoardConnected(hazardSet)) {
+        return chosen.map(t => ({ x: t.x, y: t.y, type: 'pit', impassable: true, lethalOnEntry: true }));
+      }
+    }
+    return [];
+  }
+
+  function rollNodeHazards() {
+    const hazards = {};
+    MAP_NODES.forEach(node => {
+      hazards[node.id] = rollHazardsForNode(node);
+    });
+    nodeHazards = hazards;
+  }
+
+  function hazardLabel(hazards) {
+    if (!hazards || hazards.length === 0) return '';
+    return hazards.length + ' HAZARD TILE' + (hazards.length === 1 ? '' : 'S');
+  }
+
+  function hazardDescription(hazards) {
+    if (!hazards || hazards.length === 0) return 'No hazard tiles on this map.';
+    return 'HAZARDS: ' + hazards.length + ' pit tile' + (hazards.length === 1 ? '' : 's') +
+      ' block movement — anything shoved into one is destroyed instantly.';
+  }
+
   function objectiveLabel(obj) {
     switch (obj.type) {
       case 'protect_vip': return 'PROTECT';
@@ -923,6 +1036,13 @@
 
   function bfsReachable(unit) {
     const occupied = occupiedSet(unit);
+    // Impassable hazard tiles (pits) are folded into the same blocked-tile check as
+    // occupied tiles: a normal unit can neither pass through nor land on either kind,
+    // while curse_of_dragon's existing fly-over ability treats both the same way —
+    // passable, but never a valid landing spot.
+    const impassableHazards = new Set(
+      currentHazards().filter(h => h.impassable).map(h => h.x + ',' + h.y)
+    );
     const canPassThrough = unit.unitId === 'curse_of_dragon';
     const start = { x: unit.x, y: unit.y };
     const visited = new Map([[start.x + ',' + start.y, 0]]);
@@ -940,11 +1060,11 @@
         if (n.x < 0 || n.x >= GRID || n.y < 0 || n.y >= GRID) continue;
         const key = n.x + ',' + n.y;
         if (visited.has(key)) continue;
-        const isOccupied = occupied.has(key);
-        if (isOccupied && !canPassThrough) continue;
+        const isBlocked = occupied.has(key) || impassableHazards.has(key);
+        if (isBlocked && !canPassThrough) continue;
         visited.set(key, dist + 1);
         queue.push(n);
-        if (!isOccupied) result.push(n);
+        if (!isBlocked) result.push(n);
       }
     }
     return result;
@@ -1025,6 +1145,24 @@
     return mult;
   }
 
+  function hasKnockback(unit) {
+    return !!UNIT_DATABASE[unit.unitId].knockback;
+  }
+
+  // Returns the push-destination tile for attacker->defender knockback, or null if
+  // not applicable. Only defined for range-1 (melee) attacks, where attacker and
+  // defender are guaranteed to be orthogonally adjacent, so "one tile further along
+  // the same line" is always one of 4 unambiguous directions — there's no clean
+  // equivalent for a non-adjacent (ranged) attacker. Does not check occupancy or
+  // hazards; callers decide what a blocked destination means.
+  function knockbackDestination(attacker, defender) {
+    if (manhattan(attacker.x, attacker.y, defender.x, defender.y) !== 1) return null;
+    const dx = defender.x - attacker.x, dy = defender.y - attacker.y;
+    const dest = { x: defender.x + dx, y: defender.y + dy };
+    if (dest.x < 0 || dest.x >= GRID || dest.y < 0 || dest.y >= GRID) return null;
+    return dest;
+  }
+
   function onUnitDeath(defender, attacker) {
     if (defender.team === 'player') playerDeaths += 1; else enemyDeaths += 1;
     attacker.kills += 1;
@@ -1093,6 +1231,25 @@
         log(labelOf(attacker) + ' is destroyed!');
         onUnitDeath(attacker, defender);
       }
+    }
+
+    // Knockback: only for a defender that survived the hit — a destroyed defender
+    // has no tile left to be pushed to.
+    if (defender.alive && hasKnockback(attacker)) {
+      const dest = knockbackDestination(attacker, defender);
+      if (dest && !unitAt(dest.x, dest.y)) {
+        const pit = currentHazards().find(h => h.x === dest.x && h.y === dest.y && h.impassable && h.lethalOnEntry);
+        if (pit) {
+          defender.alive = false;
+          log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a pit!');
+          onUnitDeath(defender, attacker);
+        } else {
+          defender.x = dest.x;
+          defender.y = dest.y;
+          log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' back a tile.');
+        }
+      }
+      // Off-board or an occupied destination: the shove simply fails, no extra effect.
     }
   }
 
@@ -1373,6 +1530,10 @@
       // player during the telegraph, which can be a superset of primaryStrikeTiles.
       const primaryStrikeTiles = [];
       const previewStrikeTiles = [];
+      // Parallel to primaryStrikeTiles: the shove destination for a knockback-capable
+      // unit's planned hit, or null when there's no real target (a blank strike has
+      // no defender to push) or the unit has no knockback trait.
+      const knockbackTiles = [];
 
       if (!isRetreat) {
         let attacksLeft = attacksPerTurn(unit);
@@ -1383,11 +1544,13 @@
             const primary = inRange[0];
             primaryStrikeTiles.push({ x: primary.x, y: primary.y });
             getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
+            knockbackTiles.push(hasKnockback(unit) ? knockbackDestination(unit, primary) : null);
           } else {
             const blank = pickBlankStrikeTile(unit);
             if (!blank) break; // boxed in by allies on every tile in range — nothing legal to hit
             primaryStrikeTiles.push(blank);
             previewStrikeTiles.push(blank);
+            knockbackTiles.push(null);
           }
           attacksLeft -= 1;
         }
@@ -1395,7 +1558,7 @@
 
       plan.push({
         unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y,
-        primaryStrikeTiles, previewStrikeTiles, isRetreat,
+        primaryStrikeTiles, previewStrikeTiles, knockbackTiles, isRetreat,
       });
     }
 
@@ -1589,6 +1752,24 @@
         ctx.strokeRect(entry.destX * TILE + 5, entry.destY * TILE + 5, TILE - 10, TILE - 10);
         ctx.restore();
       }
+
+      if (entry.knockbackTiles) {
+        entry.primaryStrikeTiles.forEach((strikeTile, i) => {
+          const push = entry.knockbackTiles[i];
+          if (!push) return;
+          ctx.save();
+          ctx.strokeStyle = '#7c3aed';
+          ctx.globalAlpha = 0.85;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(strikeTile.x * TILE + TILE / 2, strikeTile.y * TILE + TILE / 2);
+          ctx.lineTo(push.x * TILE + TILE / 2, push.y * TILE + TILE / 2);
+          ctx.stroke();
+          ctx.setLineDash([3, 2]);
+          ctx.strokeRect(push.x * TILE + 8, push.y * TILE + 8, TILE - 16, TILE - 16);
+          ctx.restore();
+        });
+      }
     });
 
     strikeCounts.forEach((count, key) => {
@@ -1632,7 +1813,7 @@
       [6, 7].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
     }
 
-    if (phase === 'battle' || phase === 'placement') drawObjectiveTileMarker();
+    if (phase === 'battle' || phase === 'placement') { drawObjectiveTileMarker(); drawHazardTileMarkers(); }
 
     if (selectedUnit && !gameOver) {
       ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
@@ -1698,6 +1879,21 @@
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(obj.x * TILE + 4, obj.y * TILE + 4, TILE - 8, TILE - 8);
     ctx.restore();
+  }
+
+  // Pit hazard tiles — drawn early, same layer as the objective-tile marker, so
+  // units standing next to (or knocked onto) one stay fully visible.
+  function drawHazardTileMarkers() {
+    currentHazards().forEach(h => {
+      ctx.save();
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.30)';
+      ctx.fillRect(h.x * TILE, h.y * TILE, TILE, TILE);
+      ctx.strokeStyle = '#7c3aed';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([2, 3]);
+      ctx.strokeRect(h.x * TILE + 4, h.y * TILE + 4, TILE - 8, TILE - 8);
+      ctx.restore();
+    });
   }
 
   // VIP / priority-target rings, drawn last so they sit on top of unit sprites and
@@ -1965,6 +2161,7 @@
     resetBattleAndDraftState();
     currentNode = null;
     rollNodeObjectives();
+    rollNodeHazards();
     showScreen('draft');
     missionIndicatorEl.style.display = 'none';
     redraftBtn.style.display = 'none';
@@ -2004,7 +2201,8 @@
       el.innerHTML =
         '<div class="map-node-name">' + node.name + '</div>' +
         '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
-        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
+        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>') +
+        (cleared || !hazardLabel(nodeHazards[node.id]) ? '' : '<div class="map-node-hazards">' + hazardLabel(nodeHazards[node.id]) + '</div>');
       if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
       mapCanvasEl.appendChild(el);
     });
@@ -2170,6 +2368,7 @@
       recruitPoolFrozen,
       clearedNodes: [...clearedNodes],
       nodeObjectives,
+      nodeHazards,
     }));
   }
 
@@ -2198,6 +2397,13 @@
         nodeObjectives = data.nodeObjectives;
       } else {
         rollNodeObjectives();
+      }
+      // Older saves predate hazards entirely — roll fresh rather than leaving
+      // every node without one.
+      if (data.nodeHazards && Object.keys(data.nodeHazards).length) {
+        nodeHazards = data.nodeHazards;
+      } else {
+        rollNodeHazards();
       }
       return true;
     } catch (e) {
@@ -2390,6 +2596,7 @@
   const missionNameEl = document.getElementById('mission-name');
   const missionBudgetEl = document.getElementById('mission-budget');
   const missionObjectiveEl = document.getElementById('mission-objective');
+  const missionHazardEl = document.getElementById('mission-hazard');
 
   function playerSpent() {
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
@@ -2413,6 +2620,7 @@
     missionNameEl.textContent = currentNode.name;
     missionBudgetEl.textContent = currentNode.budget;
     missionObjectiveEl.textContent = objectiveDescription(currentObjective());
+    missionHazardEl.textContent = hazardDescription(nodeHazards[currentNode.id]);
   }
 
   function renderUnitGrid() {
@@ -2486,6 +2694,7 @@
     confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
       '<div class="objective-banner">' + objectiveDescription(currentObjective()) + '</div>' +
+      '<div class="hazard-banner">' + hazardDescription(nodeHazards[currentNode.id]) + '</div>' +
       rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
       rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
     pickerPanelEl.style.display = 'none';
