@@ -308,6 +308,32 @@
   #win-screen h1.title { color: #9bbc0f; }
 
   #map-canvas {
+    max-height: 520px;
+    overflow-y: auto;
+  }
+
+  .map-act-header {
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #9bbc0f;
+    margin-bottom: 8px;
+  }
+
+  .map-act-header:not(:first-child) {
+    margin-top: 16px;
+  }
+
+  .map-act-locked {
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: #666a80;
+    background: #1c1c2a;
+    border: 2px solid #44445a;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .map-act-canvas {
     position: relative;
     height: 420px;
     background:
@@ -736,18 +762,40 @@
 
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
 
-  const MAP_NODES = [
-    { id: 'domino_city', name: 'Domino City', budget: 4, x: 10, y: 20 },
-    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 8, x: 30, y: 68 },
-    { id: 'battle_city', name: 'Battle City', budget: 10, x: 50, y: 15 },
-    { id: 'pegasus_castle', name: "Pegasus's Castle", budget: 11, x: 15, y: 45 },
-    { id: 'kaiba_corp', name: 'Kaiba Corp', budget: 12, x: 68, y: 55 },
-    { id: 'noah_virtual_world', name: "Noah's Virtual World", budget: 13, x: 40, y: 38 },
-    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 14, x: 82, y: 25 },
-    { id: 'ancient_egypt', name: 'Ancient Egypt', budget: 15, x: 25, y: 88 },
-    { id: 'doma', name: 'Doma', budget: 16, x: 88, y: 82 },
-    { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 60, y: 85 },
+  // Acts group the map into chapters. Adding a new chapter later is pure data
+  // entry: append an entry here and give its nodes a matching `act` id below —
+  // no rendering/gating/save logic needs to change (see isActUnlocked/renderMap).
+  const ACTS = [
+    { id: 1, name: 'Act 1: The Millennium Saga' },
   ];
+
+  const MAP_NODES = [
+    { id: 'domino_city', name: 'Domino City', budget: 4, x: 10, y: 20, act: 1 },
+    { id: 'duelist_kingdom', name: 'Duelist Kingdom', budget: 8, x: 30, y: 68, act: 1 },
+    { id: 'battle_city', name: 'Battle City', budget: 10, x: 50, y: 15, act: 1 },
+    { id: 'pegasus_castle', name: "Pegasus's Castle", budget: 11, x: 15, y: 45, act: 1 },
+    { id: 'kaiba_corp', name: 'Kaiba Corp', budget: 12, x: 68, y: 55, act: 1 },
+    { id: 'noah_virtual_world', name: "Noah's Virtual World", budget: 13, x: 40, y: 38, act: 1 },
+    { id: 'waking_the_dragons', name: 'Waking the Dragons', budget: 14, x: 82, y: 25, act: 1 },
+    { id: 'ancient_egypt', name: 'Ancient Egypt', budget: 15, x: 25, y: 88, act: 1 },
+    { id: 'doma', name: 'Doma', budget: 16, x: 88, y: 82, act: 1 },
+    { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 60, y: 85, act: 1 },
+  ];
+
+  function nodesForAct(actId) {
+    return MAP_NODES.filter(node => node.act === actId);
+  }
+
+  // An act is unlocked once every node in the act immediately before it (in ACTS
+  // order) has been cleared. The first act is always unlocked. This is derived
+  // from clearedNodes on every call rather than stored, so no save data or
+  // migration is needed to support acts.
+  function isActUnlocked(actId) {
+    const index = ACTS.findIndex(act => act.id === actId);
+    if (index <= 0) return true;
+    const previousAct = ACTS[index - 1];
+    return nodesForAct(previousAct.id).every(node => clearedNodes.has(node.id));
+  }
 
   function spritePath(unitId) {
     return 'assets/sprites/' + unitId + '.jpg';
@@ -2321,22 +2369,46 @@
     confirmTeam();
   }
 
+  // Renders one section per act, in ACTS order: unlocked acts get a header plus
+  // their own node canvas, and the loop stops at the first locked act (later
+  // acts aren't previewed). Adding a new act to ACTS/MAP_NODES needs no changes
+  // here — it's picked up automatically.
   function renderMap() {
-    mapCanvasEl.querySelectorAll('.map-node').forEach(el => el.remove());
+    mapCanvasEl.innerHTML = '';
 
-    MAP_NODES.forEach(node => {
-      const cleared = clearedNodes.has(node.id);
-      const el = document.createElement('div');
-      el.className = 'map-node' + (cleared ? ' cleared' : '');
-      el.style.left = node.x + '%';
-      el.style.top = node.y + '%';
-      el.innerHTML =
-        '<div class="map-node-name">' + node.name + '</div>' +
-        '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
-        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
-      if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
-      mapCanvasEl.appendChild(el);
-    });
+    for (const act of ACTS) {
+      const header = document.createElement('div');
+      header.className = 'map-act-header';
+      header.textContent = act.name.toUpperCase();
+      mapCanvasEl.appendChild(header);
+
+      if (!isActUnlocked(act.id)) {
+        const locked = document.createElement('div');
+        locked.className = 'map-act-locked';
+        locked.textContent = 'LOCKED — CLEAR THE PREVIOUS ACT TO UNLOCK';
+        mapCanvasEl.appendChild(locked);
+        break;
+      }
+
+      const actCanvas = document.createElement('div');
+      actCanvas.className = 'map-act-canvas';
+
+      nodesForAct(act.id).forEach(node => {
+        const cleared = clearedNodes.has(node.id);
+        const el = document.createElement('div');
+        el.className = 'map-node' + (cleared ? ' cleared' : '');
+        el.style.left = node.x + '%';
+        el.style.top = node.y + '%';
+        el.innerHTML =
+          '<div class="map-node-name">' + node.name + '</div>' +
+          '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
+          (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
+        if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
+        actCanvas.appendChild(el);
+      });
+
+      mapCanvasEl.appendChild(actCanvas);
+    }
   }
 
   startGameBtn.addEventListener('click', () => showScreen('sideselect'));
