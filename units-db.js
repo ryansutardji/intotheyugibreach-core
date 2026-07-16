@@ -8,6 +8,12 @@
 //
 // effect is a plain-language description of the unit's battle ability,
 // shown in the UI. The actual behavior is implemented in index.html.
+//
+// side is 'hero' or 'rival', based on which anime/manga duelist is most
+// iconically associated with the card (Yugi/Joey's decks vs. Kaiba/rival-duelist
+// decks). Reserved for a future side-locked draft/recruit pool — not yet consumed
+// by any current game logic. Not an even split by design; more units will fill
+// out whichever side is thin as the roster grows.
 
 const UNIT_DATABASE = {
   baby_dragon: {
@@ -19,6 +25,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Dragon',
     attribute: 'WIND',
+    side: 'hero',
     effect: 'Gains +3 ATK permanently for each enemy it destroys.',
   },
   beaver_warrior: {
@@ -30,6 +37,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Beast-Warrior',
     attribute: 'EARTH',
+    side: 'hero',
     effect: "Takes 30% less damage on turns it doesn't move.",
   },
   blue_eyes_white_dragon: {
@@ -41,6 +49,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Dragon',
     attribute: 'LIGHT',
+    side: 'rival',
     effect: 'Deals 30% bonus damage to targets not at full HP, but takes double damage from Spellcaster-type attackers.',
   },
   celtic_guardian: {
@@ -52,6 +61,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Warrior',
     attribute: 'EARTH',
+    side: 'hero',
     effect: 'If it survives being attacked by an adjacent enemy, strikes back for 50% of its ATK.',
   },
   curse_of_dragon: {
@@ -63,6 +73,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Dragon',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'Can move through occupied tiles (must still land on an empty one).',
   },
   dark_magician: {
@@ -74,6 +85,7 @@ const UNIT_DATABASE = {
     range: 3,
     type: 'Spellcaster',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'Attacks hit every enemy sharing its row or column within range, not just one target.',
   },
   dark_magician_girl: {
@@ -85,6 +97,7 @@ const UNIT_DATABASE = {
     range: 2,
     type: 'Spellcaster',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'Gains +2 ATK for every allied unit destroyed so far this battle.',
   },
   feral_imp: {
@@ -96,6 +109,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Fiend',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'Deals 40% bonus damage to targets below half HP.',
   },
   flame_swordsman: {
@@ -107,6 +121,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Warrior',
     attribute: 'FIRE',
+    side: 'hero',
     effect: 'On kill, deals splash damage (50% ATK) to enemies adjacent to the target.',
   },
   gaia_fierce_knight: {
@@ -118,6 +133,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Warrior',
     attribute: 'EARTH',
+    side: 'hero',
     effect: 'Deals 25% bonus damage on turns it moved before attacking.',
   },
   gemini_elf: {
@@ -129,6 +145,7 @@ const UNIT_DATABASE = {
     range: 2,
     type: 'Spellcaster',
     attribute: 'EARTH',
+    side: 'rival',
     effect: 'Can attack twice per turn.',
   },
   giant_soldier_of_stone: {
@@ -140,6 +157,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Rock',
     attribute: 'EARTH',
+    side: 'hero',
     effect: 'Adjacent allies take 25% less damage.',
   },
   kaiser_sea_horse: {
@@ -151,6 +169,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Sea Serpent',
     attribute: 'LIGHT',
+    side: 'rival',
     effect: 'Gains +6 ATK while adjacent to any Dragon-type ally (and grants the same to it).',
   },
   kuriboh: {
@@ -162,6 +181,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Fiend',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'The first attack that would ever damage this unit is negated instead.',
   },
   man_eater_bug: {
@@ -173,6 +193,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Insect',
     attribute: 'EARTH',
+    side: 'rival',
     effect: 'When destroyed, deals damage equal to its max HP to whoever destroyed it.',
   },
   mystical_elf: {
@@ -184,6 +205,7 @@ const UNIT_DATABASE = {
     range: 2,
     type: 'Spellcaster',
     attribute: 'LIGHT',
+    side: 'hero',
     effect: "Heals its most wounded adjacent ally for 10 HP at the start of each of its side's turns.",
   },
   silver_fang: {
@@ -195,6 +217,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Beast',
     attribute: 'WATER',
+    side: 'hero',
     effect: 'Gains +4 ATK for each adjacent living Beast-type ally.',
   },
   summoned_skull: {
@@ -206,6 +229,7 @@ const UNIT_DATABASE = {
     range: 1,
     type: 'Fiend',
     attribute: 'DARK',
+    side: 'hero',
     effect: 'Its attacks ignore enemy damage-reduction effects.',
   },
 };
