@@ -30,12 +30,18 @@
 
   .game-container {
     display: flex;
-    gap: 16px;
-    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
     background: #1a1a2e;
     padding: 16px;
     border: 4px solid #44445a;
     box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
+  }
+
+  .game-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
   }
 
   .board-wrap {
@@ -143,33 +149,23 @@
     line-height: 1.5;
   }
 
-  #mission-hazard {
-    font-size: 10px;
-    color: #a78bfa;
-    letter-spacing: normal;
-    margin-top: 4px;
-    line-height: 1.5;
-  }
-
   #objective-status {
     text-align: center;
-    font-size: 10px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
     color: #f0e68c;
-    margin-top: 4px;
+    padding: 8px;
+    border: 1px solid #7a6d2e;
+    border-radius: 3px;
+    background: rgba(240, 230, 140, 0.08);
   }
+
+  #objective-status:empty { display: none; }
 
   .objective-banner {
     font-size: 11px;
     color: #f0e68c;
-    line-height: 1.5;
-    margin-bottom: 10px;
-    padding-bottom: 10px;
-    border-bottom: 1px dotted #44445a;
-  }
-
-  .hazard-banner {
-    font-size: 11px;
-    color: #a78bfa;
     line-height: 1.5;
     margin-bottom: 10px;
     padding-bottom: 10px;
@@ -361,13 +357,6 @@
     letter-spacing: 1px;
     color: #38bdf8;
     margin-top: 3px;
-  }
-
-  .map-node-hazards {
-    font-size: 9px;
-    letter-spacing: 1px;
-    color: #a78bfa;
-    margin-top: 2px;
   }
 
   #budget-meter {
@@ -604,7 +593,6 @@
     <div id="mission-indicator">
       MISSION: <span id="mission-name">—</span> — BUDGET <span id="mission-budget">10</span>
       <div id="mission-objective"></div>
-      <div id="mission-hazard"></div>
     </div>
     <div id="budget-meter">BUDGET: <span id="budget-remaining">10</span> / 10 REMAINING</div>
   </div>
@@ -629,6 +617,9 @@
 </div>
 
 <div class="game-container hidden">
+  <div id="objective-status"></div>
+
+  <div class="game-row">
   <div class="board-wrap">
     <canvas id="board" width="512" height="512"></canvas>
     <div id="overlay-banner">
@@ -644,7 +635,6 @@
     <div class="panel" id="turn-panel">
       <div id="turn-indicator" class="player">PLAYER TURN</div>
       <div id="round-counter">ROUND 1</div>
-      <div id="objective-status"></div>
     </div>
 
     <div class="panel">
@@ -681,6 +671,7 @@
       <div class="legend-note">Mission objectives: yellow tile glow = a tile you must defend. Blue ring = your VIP unit — protect it. Yellow ring = the enemy's priority target — destroying it wins instantly.</div>
       <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Some heavy melee units can shove an adjacent enemy back a tile on hit; a purple arrow in the telegraph shows where that shove will land.</div>
     </div>
+  </div>
   </div>
 </div>
 
@@ -931,17 +922,6 @@
       hazards[node.id] = rollHazardsForNode(node);
     });
     nodeHazards = hazards;
-  }
-
-  function hazardLabel(hazards) {
-    if (!hazards || hazards.length === 0) return '';
-    return hazards.length + ' HAZARD TILE' + (hazards.length === 1 ? '' : 'S');
-  }
-
-  function hazardDescription(hazards) {
-    if (!hazards || hazards.length === 0) return 'No hazard tiles on this map.';
-    return 'HAZARDS: ' + hazards.length + ' pit tile' + (hazards.length === 1 ? '' : 's') +
-      ' block movement — anything shoved into one is destroyed instantly.';
   }
 
   function objectiveLabel(obj) {
@@ -1922,7 +1902,7 @@
   // Live objective status shown in the turn panel throughout the fight — the same
   // role unit HP bars play for individual units, but for the mission as a whole.
   function renderObjectiveStatus() {
-    if (phase !== 'battle' || !objectiveStatusEl) return;
+    if ((phase !== 'battle' && phase !== 'placement') || !objectiveStatusEl) return;
     const obj = currentObjective();
     if (!obj) { objectiveStatusEl.textContent = ''; return; }
 
@@ -2201,8 +2181,7 @@
       el.innerHTML =
         '<div class="map-node-name">' + node.name + '</div>' +
         '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
-        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>') +
-        (cleared || !hazardLabel(nodeHazards[node.id]) ? '' : '<div class="map-node-hazards">' + hazardLabel(nodeHazards[node.id]) + '</div>');
+        (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
       if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
       mapCanvasEl.appendChild(el);
     });
@@ -2596,7 +2575,6 @@
   const missionNameEl = document.getElementById('mission-name');
   const missionBudgetEl = document.getElementById('mission-budget');
   const missionObjectiveEl = document.getElementById('mission-objective');
-  const missionHazardEl = document.getElementById('mission-hazard');
 
   function playerSpent() {
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
@@ -2620,7 +2598,6 @@
     missionNameEl.textContent = currentNode.name;
     missionBudgetEl.textContent = currentNode.budget;
     missionObjectiveEl.textContent = objectiveDescription(currentObjective());
-    missionHazardEl.textContent = hazardDescription(nodeHazards[currentNode.id]);
   }
 
   function renderUnitGrid() {
@@ -2694,7 +2671,6 @@
     confirmedAiTeam = draftAITeam(currentNode.budget);
     resultsContentEl.innerHTML =
       '<div class="objective-banner">' + objectiveDescription(currentObjective()) + '</div>' +
-      '<div class="hazard-banner">' + hazardDescription(nodeHazards[currentNode.id]) + '</div>' +
       rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
       rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
     pickerPanelEl.style.display = 'none';
