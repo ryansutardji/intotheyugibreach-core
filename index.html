@@ -264,6 +264,7 @@
   .legend-note { color: #666a80; font-size: 10px; margin-top: 4px; line-height: 1.5; }
 
   #title-screen,
+  #side-select-screen,
   #home-screen,
   #gameover-screen,
   #win-screen,
@@ -282,6 +283,7 @@
   }
 
   #title-screen.hidden,
+  #side-select-screen.hidden,
   #home-screen.hidden,
   #gameover-screen.hidden,
   #win-screen.hidden,
@@ -292,6 +294,7 @@
   .game-container.hidden { display: none; }
 
   #title-screen .subtitle,
+  #side-select-screen .subtitle,
   #home-screen .subtitle,
   #gameover-screen .subtitle,
   #win-screen .subtitle {
@@ -512,11 +515,24 @@
   </div>
 </div>
 
+<div id="side-select-screen" class="hidden">
+  <h1 class="title">CHOOSE YOUR SIDE</h1>
+  <div class="panel">
+    <div class="subtitle">Hero and Rival lock your draft, recruit pool, and enemies to that side's cards for the whole run. Mixed draws from every card, same as before.</div>
+  </div>
+  <div class="btn-row">
+    <button id="side-hero-btn" class="primary">HERO SIDE</button>
+    <button id="side-rival-btn" class="primary">RIVAL SIDE</button>
+    <button id="side-any-btn">MIXED (ANY SIDE)</button>
+  </div>
+</div>
+
 <div id="home-screen" class="hidden">
   <h1 class="title">HOME BASE</h1>
   <div class="panel">
     <div class="subtitle">Your squad is rested and ready. Choose a mission from the map to deploy.</div>
     <div id="star-chips-display" class="subtitle">STAR CHIPS: <span id="star-chips-count">0</span> — BUDGET CAP: <span id="budget-cap-count">10</span></div>
+    <div class="subtitle">SIDE: <span id="player-side-label">MIXED</span></div>
   </div>
   <div class="btn-row">
     <button id="deploy-btn" class="primary">DEPLOY</button>
@@ -760,6 +776,10 @@
   const bannerRestartBtn = document.getElementById('banner-restart');
   const legendRowsEl = document.getElementById('legend-rows');
   const titleScreenEl = document.getElementById('title-screen');
+  const sideSelectScreenEl = document.getElementById('side-select-screen');
+  const sideHeroBtn = document.getElementById('side-hero-btn');
+  const sideRivalBtn = document.getElementById('side-rival-btn');
+  const sideAnyBtn = document.getElementById('side-any-btn');
   const homeScreenEl = document.getElementById('home-screen');
   const gameoverScreenEl = document.getElementById('gameover-screen');
   const gameoverRestartBtn = document.getElementById('gameover-restart-btn');
@@ -2137,6 +2157,7 @@
 
   function showScreen(name) {
     titleScreenEl.classList.toggle('hidden', name !== 'title');
+    sideSelectScreenEl.classList.toggle('hidden', name !== 'sideselect');
     homeScreenEl.classList.toggle('hidden', name !== 'home');
     gameoverScreenEl.classList.toggle('hidden', name !== 'gameover');
     winScreenEl.classList.toggle('hidden', name !== 'win');
@@ -2179,9 +2200,12 @@
     resultsPanelEl.style.display = 'none';
   }
 
+  const SIDE_LABELS = { hero: 'HERO', rival: 'RIVAL', any: 'MIXED' };
+
   function renderHomeScreen() {
     document.getElementById('star-chips-count').textContent = starChips;
     document.getElementById('budget-cap-count').textContent = budgetCap;
+    document.getElementById('player-side-label').textContent = SIDE_LABELS[playerSide];
     deployBtn.disabled = activeRoster.length === 0;
   }
 
@@ -2199,7 +2223,7 @@
     recruitPoolFrozen = false;
     clearedNodes = new Set();
     clearSave();
-    startInitialDraft();
+    showScreen('sideselect');
   }
 
   function triggerGameOver() {
@@ -2271,7 +2295,10 @@
     missionIndicatorEl.style.display = 'none';
     redraftBtn.style.display = 'none';
     budgetMeterEl.style.display = '';
-    draftPoolIds = shuffledUnitIds().slice(0, 8);
+    draftPoolIds = shuffledUnitIds(unitIdsForSide(playerSide)).slice(0, 8);
+    // The module-load-time recruitPool predates any side choice — rebuild it now
+    // so RECRUIT doesn't briefly show the wrong side's units after this draft.
+    recruitPool = generateRecruitPool();
     renderUnitGrid();
   }
 
@@ -2312,9 +2339,13 @@
     });
   }
 
-  startGameBtn.addEventListener('click', startInitialDraft);
-  gameoverRestartBtn.addEventListener('click', startInitialDraft);
-  winRestartBtn.addEventListener('click', startInitialDraft);
+  startGameBtn.addEventListener('click', () => showScreen('sideselect'));
+  gameoverRestartBtn.addEventListener('click', () => showScreen('sideselect'));
+  winRestartBtn.addEventListener('click', () => showScreen('sideselect'));
+
+  sideHeroBtn.addEventListener('click', () => { playerSide = 'hero'; startInitialDraft(); });
+  sideRivalBtn.addEventListener('click', () => { playerSide = 'rival'; startInitialDraft(); });
+  sideAnyBtn.addEventListener('click', () => { playerSide = 'any'; startInitialDraft(); });
 
   deployBtn.addEventListener('click', () => {
     renderMap();
@@ -2354,6 +2385,12 @@
   let starChips = 0;
   const DRAFT_BUDGET = 10;
   let budgetCap = DRAFT_BUDGET; // raised via home base's "Increase Budget Cap"
+
+  // Chosen once per run on the Choose Your Side screen: 'hero' or 'rival' locks
+  // both the player's draft/recruit pools and the AI's draft pool to that side's
+  // units for the rest of the run; 'any' leaves every pool unrestricted (today's
+  // original behavior).
+  let playerSide = 'any';
 
   // ---------- Leveling ----------
   // Each roster entry carries its own level/xp, independent of the base
@@ -2438,8 +2475,8 @@
   const RESPIN_COST = 3;
   const FREEZE_COST = 3;
 
-  function shuffledUnitIds() {
-    const ids = Object.keys(UNIT_DATABASE);
+  function shuffledUnitIds(pool = Object.keys(UNIT_DATABASE)) {
+    const ids = pool.slice();
     for (let i = ids.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [ids[i], ids[j]] = [ids[j], ids[i]];
@@ -2447,8 +2484,18 @@
     return ids;
   }
 
+  // All units on a given side, or every unit for 'any' (Mixed mode).
+  function unitIdsForSide(side) {
+    const all = Object.keys(UNIT_DATABASE);
+    return side === 'any' ? all : all.filter(id => UNIT_DATABASE[id].side === side);
+  }
+
+  function opposingSide(side) {
+    return side === 'hero' ? 'rival' : side === 'rival' ? 'hero' : 'any';
+  }
+
   function generateRecruitPool() {
-    return shuffledUnitIds().slice(0, 5);
+    return shuffledUnitIds(unitIdsForSide(playerSide)).slice(0, 5);
   }
 
   let recruitPool = generateRecruitPool();
@@ -2468,6 +2515,7 @@
       bench,
       starChips,
       budgetCap,
+      playerSide,
       recruitPool,
       recruitPoolFrozen,
       clearedNodes: [...clearedNodes],
@@ -2492,6 +2540,7 @@
       bench = data.bench;
       starChips = data.starChips;
       budgetCap = data.budgetCap;
+      playerSide = data.playerSide || 'any';
       recruitPool = data.recruitPool;
       recruitPoolFrozen = data.recruitPoolFrozen;
       clearedNodes = new Set(data.clearedNodes || []);
@@ -2708,8 +2757,9 @@
   function draftAITeam(budget) {
     const team = [];
     let remaining = budget;
+    const sidePool = unitIdsForSide(opposingSide(playerSide));
     while (true) {
-      const pool = Object.keys(UNIT_DATABASE)
+      const pool = sidePool
         .filter(id => !team.includes(id) && UNIT_DATABASE[id].cost <= remaining);
       if (pool.length === 0) break;
       const pick = pool[Math.floor(Math.random() * pool.length)];

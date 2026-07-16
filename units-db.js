@@ -11,9 +11,11 @@
 //
 // side is 'hero' or 'rival', based on which anime/manga duelist is most
 // iconically associated with the card (Yugi/Joey's decks vs. Kaiba/rival-duelist
-// decks). Reserved for a future side-locked draft/recruit pool — not yet consumed
-// by any current game logic. Not an even split by design; more units will fill
-// out whichever side is thin as the roster grows.
+// decks). Drives the side-locked draft/recruit pool (see playerSide in index.html):
+// picking Hero or Rival at the start of a run restricts both the player's and the
+// AI's pools to their respective 16 units; Mixed mode ignores this field entirely.
+// Not an even split by design; more units will fill out whichever side is thin as
+// the roster grows.
 
 const UNIT_DATABASE = {
   baby_dragon: {
