@@ -24,7 +24,7 @@ since hero has none at 8): 1×cost1, 2×cost2, 3×cost3, 4×cost4, 2×cost5, 2×
 Also: rival gets a 2nd Dragon-type (alongside Blue-Eyes) so Kaiser Sea Horse's "+ATK while
 adjacent to a Dragon" effect has more than one payoff partner to draft alongside it.
 
-- [ ] **Add 2 new hero units** (fills hero's cost-2 tier, which was previously empty):
+- [x] **Add 2 new hero units** (fills hero's cost-2 tier, which was previously empty):
     - **Time Wizard** — cost 2, hp 26, atk 9, move 3, range 2, Spellcaster, DARK.
       Effect: "Adjacent friendly units have a 50% chance to deal double damage on their
       attacks — or none at all." Support/aura unit, not a self-buff — mirrors the existing
@@ -38,7 +38,7 @@ adjacent to a Dragon" effect has more than one payoff partner to draft alongside
       the attacker's own HP instead of the target's) rather than inventing a new
       player-activated-ability system that doesn't exist anywhere else in the codebase.
 
-- [ ] **Add 12 new rival units:**
+- [x] **Add 12 new rival units:**
     - **Sinister Serpent** — cost 1, hp 20, atk 8, move 4, range 1, Reptile, WATER.
       Effect: "The first time it would be destroyed each battle, survives with 1 HP instead."
     - **Petit Dragon** — cost 2, hp 26, atk 8, move 4, range 1, Dragon, WIND.
@@ -59,7 +59,7 @@ adjacent to a Dragon" effect has more than one payoff partner to draft alongside
       of Baby Dragon's kill-growth — scales off the victim's ATK instead of a flat amount.)
     - **Reaper of the Cards** — cost 5, hp 64, atk 15, move 3, range 2, Spellcaster, DARK.
       Effect: "Instantly destroys any target already at 20% HP or below when it attacks."
-    - **Different Dimension Warrior** — cost 5, hp 56, atk 14, move 3, range 1, Warrior, LIGHT.
+    - **D.D. Warrior** — cost 5, hp 56, atk 14, move 3, range 1, Warrior, LIGHT.
       Effect: "Attacks permanently reduce the target's ATK by 20%."
     - **Jinzo** — cost 6, hp 52, atk 24, move 2, range 1, Machine, DARK.
       Effect: "Adjacent enemies cannot trigger negate, counter, retaliation, or revival
@@ -70,6 +70,8 @@ adjacent to a Dragon" effect has more than one payoff partner to draft alongside
       retaliation, Sinister Serpent's/Dragon Zombie's revive) rather than being fully
       self-contained. Simplify to a flat damage aura instead if that touch-everywhere shape
       isn't worth it at implementation time.
+      **Implemented as the flat aura**: deals 5 dmg to all adjacent enemies at the start of
+      each of its side's turns, rather than touching every other unit's effect checks.
     - **Insect Queen** — cost 6, hp 62, atk 19, move 2, range 1, Insect, EARTH.
       Effect: "Gains +3 ATK for every allied Insect-type unit destroyed so far this battle."
       Reuses Dark Magician Girl's existing death-counter pattern, filtered to Insect-type.
