@@ -616,6 +616,7 @@
       <div id="legend-rows"></div>
       <div class="legend-note">Outline = team (blue outline = you, red outline = enemy).</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
+      <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
     </div>
   </div>
 </div>
@@ -756,6 +757,14 @@
 
   let playerDeaths = 0;
   let enemyDeaths = 0;
+
+  // Locked-in plan for the upcoming enemy turn, computed once at the start of the
+  // player's turn (see planEnemyTurn) so it can be shown as a telegraph and then
+  // replayed verbatim in startEnemyTurn. Each entry: { unitId, fromX, fromY, destX,
+  // destY, primaryStrikeTiles, previewStrikeTiles, isRetreat }. Tile-locked: strike
+  // tiles are board squares, not unit references, so the preview stays accurate even
+  // if the player kills or relocates whatever was standing there.
+  let enemyPlan = [];
 
   function makeUnit(team, unitId, x, y, rosterId = null, level = 1) {
     const t = UNIT_DATABASE[unitId];
@@ -1140,6 +1149,68 @@
     return best;
   }
 
+  // Decides the upcoming enemy turn in full, up front, so it can be shown as a
+  // telegraph during the player's turn and then replayed verbatim (see
+  // startEnemyTurn). Reuses the same per-unit decision logic the old inline AI used
+  // (chooseAIMove / enemiesInRange / getAttackTargets), just called earlier and
+  // captured as data instead of applied immediately.
+  //
+  // Enemies are planned one at a time in their real turn order, and each planned
+  // enemy is temporarily moved to its chosen destination (then restored once
+  // planning finishes) so that later enemies' pathing and targeting account for
+  // earlier enemies' planned positions — matching how they'd actually see the board
+  // once the turn plays out for real.
+  function planEnemyTurn() {
+    const enemyUnits = units.filter(u => u.team === 'enemy' && u.alive);
+    const plan = [];
+
+    for (const unit of enemyUnits) {
+      const targets = units.filter(u => u.team === 'player' && u.alive);
+      if (targets.length === 0) break;
+
+      const isRetreat = unit.hp / unit.maxHp < 0.3;
+      const tiles = bfsReachable(unit);
+      const dest = chooseAIMove(unit, tiles, targets, isRetreat);
+
+      const fromX = unit.x, fromY = unit.y;
+      unit.x = dest.x;
+      unit.y = dest.y;
+
+      // primaryStrikeTiles drives execution (one entry per attack instance, reusing
+      // resolveAttack/getAttackTargets exactly as before). previewStrikeTiles is the
+      // fully expanded set (including Dark Magician's whole row/column) shown to the
+      // player during the telegraph, which can be a superset of primaryStrikeTiles.
+      const primaryStrikeTiles = [];
+      const previewStrikeTiles = [];
+
+      if (!isRetreat) {
+        let attacksLeft = attacksPerTurn(unit);
+        while (attacksLeft > 0) {
+          const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
+          if (inRange.length === 0) break;
+          inRange.sort((a, b) => a.hp - b.hp);
+          const primary = inRange[0];
+          primaryStrikeTiles.push({ x: primary.x, y: primary.y });
+          getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
+          attacksLeft -= 1;
+        }
+      }
+
+      plan.push({
+        unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y,
+        primaryStrikeTiles, previewStrikeTiles, isRetreat,
+      });
+    }
+
+    // Planning must not have any visible effect until the turn actually executes.
+    enemyUnits.forEach(u => {
+      const entry = plan.find(p => p.unitId === u.id);
+      if (entry) { u.x = entry.fromX; u.y = entry.fromY; }
+    });
+
+    return plan;
+  }
+
   async function startEnemyTurn() {
     currentTurn = 'enemy';
     aiRunning = true;
@@ -1156,40 +1227,54 @@
     applyTurnStartEffects('enemy');
     render();
 
-    const enemyUnits = units.filter(u => u.team === 'enemy');
+    // Replay the plan that was telegraphed during the player's turn, rather than
+    // deciding fresh — this is what makes the preview trustworthy instead of a rough
+    // guess. Each step still tolerates the board having changed since it was
+    // planned (the player killed the attacker, blocked its path, moved the
+    // threatened unit away, etc.).
+    const plan = enemyPlan;
+    enemyPlan = [];
 
-    for (const unit of enemyUnits) {
-      if (!unit.alive || gameOver) continue;
-
-      const targets = units.filter(u => u.team === 'player' && u.alive);
-      if (targets.length === 0) break;
+    for (const entry of plan) {
+      const unit = units.find(u => u.id === entry.unitId);
+      if (!unit || !unit.alive || gameOver) continue;
 
       await delay(400);
 
-      const isRetreat = unit.hp / unit.maxHp < 0.3;
-      const tiles = bfsReachable(unit);
-      const dest = chooseAIMove(unit, tiles, targets, isRetreat);
+      const occupied = occupiedSet(unit);
+      const movedTarget = entry.destX !== unit.x || entry.destY !== unit.y;
+      const destBlocked = movedTarget && occupied.has(entry.destX + ',' + entry.destY);
+      const dest = destBlocked ? { x: unit.x, y: unit.y } : { x: entry.destX, y: entry.destY };
 
       if (dest.x !== unit.x || dest.y !== unit.y) {
         unit.x = dest.x;
         unit.y = dest.y;
         unit.movedThisTurn = true;
-        log(labelOf(unit) + (isRetreat ? ' retreats.' : ' advances.'));
+        log(labelOf(unit) + (entry.isRetreat ? ' retreats.' : ' advances.'));
+      } else if (destBlocked) {
+        log(labelOf(unit) + "'s path is blocked!");
       }
       render();
 
       await delay(350);
 
-      if (!isRetreat) {
-        let inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
-        while (unit.alive && inRange.length > 0 && unit.attacksUsed < attacksPerTurn(unit)) {
-          inRange.sort((a, b) => a.hp - b.hp);
-          resolveAttack(unit, inRange[0]);
+      if (!entry.isRetreat) {
+        for (const strikeTile of entry.primaryStrikeTiles) {
+          if (!unit.alive || gameOver) break;
+          if (manhattan(unit.x, unit.y, strikeTile.x, strikeTile.y) > unit.range) {
+            log(labelOf(unit) + "'s attack falls short.");
+            continue;
+          }
+          const target = unitAt(strikeTile.x, strikeTile.y);
+          if (!target || target.team !== 'player') {
+            log(labelOf(unit) + ' strikes empty ground.');
+            continue;
+          }
+          resolveAttack(unit, target);
           unit.attacksUsed += 1;
           render();
           if (checkGameOver()) { aiRunning = false; return; }
           await delay(400);
-          inRange = unit.alive ? enemiesInRange(unit.x, unit.y, unit.range, 'enemy') : [];
         }
       }
     }
@@ -1214,6 +1299,7 @@
     turnIndicatorEl.className = 'player';
     roundCounterEl.textContent = 'ROUND ' + round;
     endTurnBtn.disabled = false;
+    enemyPlan = planEnemyTurn();
     render();
   }
 
@@ -1256,6 +1342,72 @@
     ctx.stroke();
   }
 
+  // Renders the locked-in enemyPlan: where each living enemy will move, which tiles
+  // it will strike (tile-locked — these stay put even if the player empties the
+  // tile), and where fleeing enemies are retreating to. Drawn under the grid lines
+  // and units, same layering as the existing move/attack highlight.
+  function drawEnemyTelegraph() {
+    const strikeCounts = new Map();
+    enemyPlan.forEach(entry => {
+      if (entry.isRetreat) return;
+      const unit = units.find(u => u.id === entry.unitId);
+      if (!unit || !unit.alive) return;
+      entry.previewStrikeTiles.forEach(t => {
+        const key = t.x + ',' + t.y;
+        strikeCounts.set(key, (strikeCounts.get(key) || 0) + 1);
+      });
+    });
+
+    enemyPlan.forEach(entry => {
+      const unit = units.find(u => u.id === entry.unitId);
+      if (!unit || !unit.alive) return;
+
+      const moved = entry.destX !== entry.fromX || entry.destY !== entry.fromY;
+      if (moved) {
+        const color = entry.isRetreat ? '#94a3b8' : '#f97316';
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(entry.fromX * TILE + TILE / 2, entry.fromY * TILE + TILE / 2);
+        ctx.lineTo(entry.destX * TILE + TILE / 2, entry.destY * TILE + TILE / 2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(entry.destX * TILE + 5, entry.destY * TILE + 5, TILE - 10, TILE - 10);
+        ctx.restore();
+      }
+    });
+
+    strikeCounts.forEach((count, key) => {
+      const [x, y] = key.split(',').map(Number);
+      ctx.save();
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.32)';
+      ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x * TILE + 2, y * TILE + 2, TILE - 4, TILE - 4);
+      if (count > 1) {
+        const cx = x * TILE + TILE - 10, cy = y * TILE + 10;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+        ctx.fillStyle = '#ef4444';
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(count), cx, cy + 1);
+      }
+      ctx.restore();
+    });
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1285,6 +1437,8 @@
         ctx.strokeRect(u.x * TILE + 2, u.y * TILE + 2, TILE - 4, TILE - 4);
       });
     }
+
+    if (currentTurn === 'player' && !gameOver) drawEnemyTelegraph();
 
     ctx.strokeStyle = '#44445a';
     ctx.lineWidth = 1;
@@ -1425,6 +1579,7 @@
     reachableTiles = [];
     attackableTargets = [];
     hoveredTile = null;
+    enemyPlan = [];
     battleLogEl.innerHTML = '';
     bannerEl.classList.remove('show', 'victory', 'defeat');
     endTurnBtn.disabled = false;
@@ -2209,6 +2364,7 @@
 
     battleLogEl.innerHTML = '';
     log('Battle begins! Eliminate all enemy units to win.');
+    enemyPlan = planEnemyTurn();
     render();
   }
 
