@@ -1,8 +1,5 @@
 ## To-do items to improve gameplay
 
-- [ ] **Boss nodes**: special high-value/high-difficulty nodes on the map (single
-      scripted high-cost monster — Blue-Eyes, Exodia pieces, etc.) instead of a normal
-      AI draft, replacing the old "every N stages" cadence now that stages aren't linear.
 - [ ] **Equip-style reward**: still open — could be reframed as another thing purchasable
       with Star Chips at home base (a Spell/Trap-flavored modifier attached to one unit)
       rather than a random per-stage node reward.

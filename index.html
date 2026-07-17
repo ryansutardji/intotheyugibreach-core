@@ -376,15 +376,6 @@
 
   .map-node.boss:hover { border-color: #ef4444; }
 
-  .map-node.locked {
-    cursor: default;
-    opacity: 0.55;
-    background: #1c1c2a;
-    border-color: #3a3a4e;
-  }
-
-  .map-node.locked:hover { border-color: #3a3a4e; }
-
   .map-node-name {
     font-size: 11px;
     letter-spacing: 1px;
@@ -2477,21 +2468,18 @@
 
       nodesForAct(act.id).forEach(node => {
         const cleared = clearedNodes.has(node.id);
-        const locked = !cleared && !isNodeUnlocked(node);
+        // A locked boss node isn't just disabled, it's not rendered at all — no
+        // hint it exists until it's actually reachable (or debugUnlockAll is on).
+        if (!cleared && !isNodeUnlocked(node)) return;
         const el = document.createElement('div');
-        el.className = 'map-node' +
-          (node.boss ? ' boss' : '') +
-          (cleared ? ' cleared' : '') +
-          (locked ? ' locked' : '');
+        el.className = 'map-node' + (node.boss ? ' boss' : '') + (cleared ? ' cleared' : '');
         el.style.left = node.x + '%';
         el.style.top = node.y + '%';
         el.innerHTML =
           '<div class="map-node-name">' + node.name + '</div>' +
-          '<div class="map-node-budget">' +
-            (cleared ? 'CLEARED' : locked ? 'LOCKED' : 'BUDGET ' + node.budget) +
-          '</div>' +
-          (cleared || locked ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
-        if (!cleared && !locked) el.addEventListener('click', () => enterDraftForNode(node));
+          '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
+          (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
+        if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
         actCanvas.appendChild(el);
       });
 
@@ -2862,7 +2850,7 @@
       return squadCardHtml(e, fits ? '' : 'disabled');
     }).join('') || '<div class="empty-hint">Bench is empty.</div>';
 
-    const capCost = budgetCap * 2;
+    const capCost = budgetCap;
     increaseCapBtn.textContent = 'INCREASE BUDGET CAP (' + capCost + ')';
     increaseCapBtn.disabled = starChips < capCost;
   }
@@ -2892,7 +2880,7 @@
   });
 
   increaseCapBtn.addEventListener('click', () => {
-    const capCost = budgetCap * 2;
+    const capCost = budgetCap;
     if (starChips < capCost) return;
     starChips -= capCost;
     budgetCap += 1;
