@@ -1,8 +1,8 @@
 ## To-do items to improve gameplay
 
-- [ ] **Equip-style reward**: still open — could be reframed as another thing purchasable
-      with Star Chips at home base (a Spell/Trap-flavored modifier attached to one unit)
-      rather than a random per-stage node reward.
+- [ ] **Create unit database**: The units-db.js is hard to read so we need to build a view that
+      can be accessed in-game with all the units, stats and effects so we can easily see what 
+      units have what. There should be filters for attributes, types, cost and team (hero vs rival)
 - [ ] **Turn on knockback**: the knockback system is fully wired end-to-end already —
       `hasKnockback()`, push-destination math, pit-shove-kills-on-landing resolution, AI
       turn planning, and its own purple telegraph arrow all exist (`index.html` ~1225-1400,

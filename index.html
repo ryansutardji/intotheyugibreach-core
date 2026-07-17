@@ -1080,7 +1080,7 @@
   function objectiveLabel(obj) {
     switch (obj.type) {
       case 'survive_rounds': return 'SURVIVE ' + obj.rounds;
-      case 'eliminate_target': return 'ELIMINATE';
+      case 'eliminate_target': return 'VIP';
       case 'timed_clear': return 'CLEAR IN ' + obj.rounds;
       default: return 'ELIMINATE ALL';
     }
@@ -1761,11 +1761,216 @@
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
+  // ---------- AI target scoring ----------
+  // Replaces the old "walk toward nearest, then hit whatever's lowest-HP once you
+  // arrive" two-step process with a single scoring pass: for every reachable tile,
+  // work out the best thing that could actually be hit from there, and walk to
+  // whichever tile gives the best answer. This is what lets buildings become a real,
+  // chosen destination instead of something only ever hit by accident.
+
+  // Five tiers, each 10x the one below, so no in-tier nudge can ever let a lower
+  // tier outscore a higher one: a game-ending kill always wins; killing a building
+  // beats killing a unit (a unit could have dodged, a building can't); either kind
+  // of kill beats any non-lethal hit; and chipping a building always beats chipping
+  // a unit, since a building can't just walk away from the damage next turn.
+  const TIER_BASE = { gameEnding: 1000000, killBuilding: 10000, killUnit: 1000, damageBuilding: 100, damageUnit: 10 };
+
+  // A deterministic clone of outgoingDamageMultiplier for planning-time use only.
+  // Time Wizard's ally aura is a genuine 50/50 coin flip at real execution time —
+  // letting that coin flip land one way or the other would make which plan gets
+  // frozen and telegraphed itself random, so here it's replaced with its expected
+  // value (2*0.5 + 0*0.5 = 1, i.e. no change) instead of actually being rolled.
+  function estimateOutgoingDamageMultiplier(attacker, defender) {
+    let mult = 1;
+    if (attacker.unitId === 'gaia_fierce_knight' && attacker.movedThisTurn) mult *= 1.25;
+    if (attacker.unitId === 'feral_imp' && defender.hp / defender.maxHp < 0.5) mult *= 1.4;
+    if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
+    if (attacker.unitId === 'injection_fairy_lily' && attacker.hp / attacker.maxHp < 0.5) mult *= 3;
+    return mult;
+  }
+
+  // Estimated (non-random) damage for scoring purposes only — real execution still
+  // rolls the actual 0.85-1.15 variance and any instant-kill effects fresh via
+  // resolveAttack/applyAttackDamage, exactly as today. fromX/fromY is the unit's
+  // real position at the start of this planning pass; unit.x/y is whatever
+  // hypothetical (or real, once committed) position is currently being evaluated,
+  // so comparing the two tells us whether Gaia's "moved this turn" bonus would
+  // apply without needing to trust the unit's live movedThisTurn flag, which is
+  // stale during planning.
+  function estimateDamage(unit, fromX, fromY, target) {
+    const origMoved = unit.movedThisTurn;
+    unit.movedThisTurn = (unit.x !== fromX || unit.y !== fromY);
+    let dmg;
+    try {
+      dmg = unit.atk + outgoingDamageBonusFlat(unit);
+      dmg *= estimateOutgoingDamageMultiplier(unit, target);
+      dmg *= incomingDamageMultiplier(unit, target);
+    } finally {
+      unit.movedThisTurn = origMoved;
+    }
+    return Math.max(1, Math.round(dmg));
+  }
+
+  function tierScoreForHit(unit, fromX, fromY, target, context) {
+    const isBuilding = target.type === 'building';
+    const dmg = estimateDamage(unit, fromX, fromY, target);
+    const wouldKill = dmg >= target.hp;
+
+    if (isBuilding) {
+      if (wouldKill && context.buildingsAlive.length === 1) return TIER_BASE.gameEnding;
+      if (wouldKill) return TIER_BASE.killBuilding;
+      return TIER_BASE.damageBuilding + Math.min(1, dmg / target.maxHp) * 90;
+    }
+    if (wouldKill) return TIER_BASE.killUnit + target.cost * 10;
+    return TIER_BASE.damageUnit + Math.min(1, dmg / target.maxHp) * 9;
+  }
+
+  // Best tier score achievable if unit stood at (x,y) — temporarily relocates the
+  // unit there so ally-adjacency effects (Silver Fang, Kaiser Sea Horse, etc.) and
+  // range checks see the hypothetical position, then restores it. Returns 0 if
+  // nothing at all is in range from there.
+  function bestAchievableHitScore(unit, x, y, fromX, fromY, context) {
+    const origX = unit.x, origY = unit.y;
+    unit.x = x; unit.y = y;
+    let best = 0;
+    const inRangeBuildings = context.buildingsAlive.filter(b => manhattan(x, y, b.x, b.y) <= unit.range);
+    const inRangeUnits = enemiesInRange(x, y, unit.range, 'enemy');
+    inRangeUnits.concat(inRangeBuildings).forEach(t => {
+      const score = tierScoreForHit(unit, fromX, fromY, t, context);
+      if (score > best) best = score;
+    });
+    unit.x = origX; unit.y = origY;
+    return best;
+  }
+
+  // A player unit within range of this tile that sits on a shortest path between
+  // this unit's current position and its nearest surviving building — a cheap
+  // Manhattan-distance proxy for "this player is blocking my way to the objective",
+  // not true path/hazard-aware geometry. Only relevant on survive_rounds, where
+  // several units independently converging on the same building should actually
+  // treat whoever's in the way as worth hitting, not just an obstacle to ignore.
+  function blockerBonus(unit, tile, context) {
+    if (context.buildingsAlive.length === 0) return 0;
+    let nearestBuilding = null, nearestD = Infinity;
+    context.buildingsAlive.forEach(b => {
+      const d = manhattan(unit.x, unit.y, b.x, b.y);
+      if (d < nearestD) { nearestD = d; nearestBuilding = b; }
+    });
+    if (!nearestBuilding) return 0;
+    const inRangeHere = enemiesInRange(tile.x, tile.y, unit.range, 'enemy');
+    const isBlocking = inRangeHere.some(p => {
+      const toBlocker = manhattan(unit.x, unit.y, p.x, p.y);
+      const blockerToGoal = manhattan(p.x, p.y, nearestBuilding.x, nearestBuilding.y);
+      return toBlocker + blockerToGoal === nearestD;
+    });
+    return isBlocking ? 15 : 0;
+  }
+
+  // Positional pulls layered on top of the raw hit score — escort/target mutual
+  // attraction (eliminate_target) and ally bunch/spread (survive_rounds, and
+  // timed_clear's closing rounds). Capped well under the ~81-point gap between the
+  // smallest adjacent tiers, so these can only break ties within a tier or tip a
+  // weaker tier over a stronger one that isn't reachable some other way — never
+  // fake a jump across tiers.
+  function positionalBonus(unit, tile, context) {
+    let bonus = 0;
+
+    if (context.markedTarget && context.escort) {
+      if (unit === context.markedTarget) {
+        const d = manhattan(tile.x, tile.y, context.escort.x, context.escort.y);
+        bonus += Math.max(0, 50 - 10 * d);
+      } else if (unit === context.escort) {
+        const d = manhattan(tile.x, tile.y, context.markedTarget.x, context.markedTarget.y);
+        bonus += Math.max(0, 80 - 15 * d);
+      }
+    }
+
+    if (context.spacingMode) {
+      const allies = units.filter(u => u.team === 'enemy' && u.alive && u !== unit);
+      if (allies.length > 0) {
+        let minD = Infinity;
+        allies.forEach(a => { const d = manhattan(tile.x, tile.y, a.x, a.y); if (d < minD) minD = d; });
+        bonus += context.spacingMode === 'bunch' ? Math.max(0, 30 - 8 * minD) : Math.min(30, 5 * minD);
+      }
+    }
+
+    if (context.obj.type === 'survive_rounds') {
+      bonus += blockerBonus(unit, tile, context);
+    }
+
+    return bonus;
+  }
+
+  // Built fresh at the top of every planEnemyTurn() call (itself called once per
+  // round, from startPlayerTurn) — so the escort pick, outnumbered check, and
+  // round-based triggers below are always working off the current roster and
+  // round number. No reactive "recompute when a unit dies" logic is needed: a
+  // death just means next round's call sees a smaller roster, same as it seeing a
+  // different round number.
+  function buildPlanningContext(enemyUnits) {
+    const obj = currentObjective() || { type: 'kill_all' };
+    const buildingsAlive = buildings.filter(b => b.hp > 0);
+    const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
+
+    // eliminate_target: the marked unit is one hit from ending the mission, so it
+    // gets an escort — whichever other living enemy currently hits hardest —
+    // recomputed every round rather than a fixed unit, since that could change as
+    // units die. Ties broken by range, then cost, then max HP; a full tie falls
+    // through to array order (whichever was placed first), since sort is stable.
+    let markedTarget = null, escort = null;
+    if (obj.type === 'eliminate_target') {
+      markedTarget = enemyUnits.find(u => u.isPriorityTarget) || null;
+      if (markedTarget) {
+        const others = enemyUnits.filter(u => u !== markedTarget);
+        if (others.length) {
+          escort = others.slice().sort((a, b) =>
+            b.atk - a.atk || b.range - a.range || b.cost - a.cost || b.maxHp - a.maxHp
+          )[0];
+        }
+      }
+    }
+
+    // survive_rounds favors the player just by the clock running out, so the AI
+    // presses hard the whole mission: bunch up and rush buildings from turn one.
+    // timed_clear favors the AI the same way in reverse, so it plays normal/cautious
+    // until the clock is nearly up, then — with 2+ buildings still standing —
+    // spreads out if outnumbered (reduce how much one player attack can threaten)
+    // or bunches up for mutual backup if not. With exactly 1 building left, no
+    // special mode is needed at all: the tier table already ranks killing it above
+    // killing a unit, and the no-valid-attack fallback below already beelines
+    // whoever's not otherwise busy toward the only building left.
+    let spacingMode = null;
+    if (obj.type === 'survive_rounds') {
+      spacingMode = 'bunch';
+    } else if (obj.type === 'timed_clear' && (obj.rounds - round) <= 2 && buildingsAlive.length >= 2) {
+      spacingMode = enemyUnits.length < alivePlayers.length ? 'spread' : 'bunch';
+    }
+
+    return { obj, buildingsAlive, markedTarget, escort, spacingMode };
+  }
+
   function planEnemyTurn() {
     const enemyUnits = units.filter(u => u.team === 'enemy' && u.alive);
+    const context = buildPlanningContext(enemyUnits);
+
+    // For eliminate_target, process the marked unit before its escort so the
+    // escort can react to the target's already-decided position this round,
+    // rather than the other way around — just a swap of these two slots, every
+    // other unit's relative order is untouched.
+    const orderedEnemyUnits = enemyUnits.slice();
+    if (context.markedTarget && context.escort) {
+      const ti = orderedEnemyUnits.indexOf(context.markedTarget);
+      const ei = orderedEnemyUnits.indexOf(context.escort);
+      if (ti > ei) {
+        const tmp = orderedEnemyUnits[ti];
+        orderedEnemyUnits[ti] = orderedEnemyUnits[ei];
+        orderedEnemyUnits[ei] = tmp;
+      }
+    }
+
     const plan = [];
 
-    for (const unit of enemyUnits) {
+    for (const unit of orderedEnemyUnits) {
       const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
       // focusLowestHP (currently only boss units) locks onto a single target — the
       // lowest-HP living player unit — instead of gravitating toward whichever
@@ -1782,9 +1987,37 @@
       // matter how badly hurt it is.
       const isRetreat = !UNIT_DATABASE[unit.unitId].neverRetreat && unit.hp / unit.maxHp < 0.3;
       const tiles = bfsReachable(unit);
-      const dest = chooseAIMove(unit, tiles, targets, isRetreat);
-
       const fromX = unit.x, fromY = unit.y;
+
+      let dest;
+      if (isRetreat) {
+        dest = chooseAIMove(unit, tiles, targets, true);
+      } else {
+        // Score every reachable tile by the best hit achievable from there, plus
+        // any positional pull (escort/spacing) — replacing the old pure-distance
+        // destination pick. rawHit (attack potential alone, ignoring positional
+        // pulls) is tracked separately from the combined total so the "nothing
+        // achievable anywhere" fallback below only fires when it's actually true,
+        // not just because some tile's positional bonus made its total positive.
+        let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
+        for (const tile of tiles) {
+          const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, context);
+          const total = rawHit + positionalBonus(unit, tile, context);
+          if (total > bestTotal) { bestTotal = total; bestTile = tile; }
+          if (rawHit > bestRawHit) bestRawHit = rawHit;
+        }
+        if (bestRawHit === 0) {
+          // No reachable tile puts anything in range this turn — beeline toward
+          // the nearest surviving building instead of the nearest player unit, and
+          // only fall back to players if there are no buildings left on the field
+          // at all. Reuses chooseAIMove's existing distance logic unchanged, just
+          // fed a buildings-first candidate list.
+          const fallbackTargets = context.buildingsAlive.length ? context.buildingsAlive : targets;
+          bestTile = chooseAIMove(unit, tiles, fallbackTargets, false);
+        }
+        dest = bestTile;
+      }
+
       unit.x = dest.x;
       unit.y = dest.y;
 
@@ -1810,8 +2043,14 @@
             manhattan(unit.x, unit.y, b.x, b.y) <= unit.range);
           const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy').concat(inRangeBuildings);
           if (inRange.length > 0) {
-            inRange.sort((a, b) => a.hp - b.hp);
-            const primary = inRange[0];
+            // Ranked by the same tiered score used to pick the destination — kill a
+            // building > kill a unit > damage a building > damage a unit — instead
+            // of the old flat "lowest HP wins", so the attack target is always
+            // whatever's actually most worth hitting rather than just whatever's
+            // weakest.
+            const primary = inRange.slice().sort((a, b) =>
+              tierScoreForHit(unit, fromX, fromY, b, context) - tierScoreForHit(unit, fromX, fromY, a, context)
+            )[0];
             primaryStrikeTiles.push({ x: primary.x, y: primary.y });
             getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
             // A building can't be shoved — skip knockback entirely for a building
@@ -3220,7 +3459,10 @@
       const enemies = units.filter(u => u.team === 'enemy' && u.alive);
       const maxCost = Math.max(...enemies.map(u => u.cost));
       const candidates = enemies.filter(u => u.cost === maxCost);
-      candidates[Math.floor(Math.random() * candidates.length)].isPriorityTarget = true;
+      const priorityTarget = candidates[Math.floor(Math.random() * candidates.length)];
+      priorityTarget.isPriorityTarget = true;
+      priorityTarget.maxHp *= 2;
+      priorityTarget.hp *= 2;
     }
 
     renderLegend();
