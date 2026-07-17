@@ -73,7 +73,7 @@ is a real dependency for the next rather than just a suggested sequence.
       N rounds — each becomes "...before your buildings collapse"). Retires
       `defend_tile` (subsumed by buildings existing at all) and `protect_vip` (dropped per
       design discussion) from `OBJECTIVE_TYPES`.
-- [ ] **Make AI actually threaten buildings**: the enemy AI is one greedy
+- [x] **Make AI actually threaten buildings**: the enemy AI is one greedy
       nearest-player-unit heuristic for every unit (`chooseAIMove`, `index.html:1595-1616`)
       with no concept of a target that isn't a player unit. Without this, buildings
       existing doesn't change how the AI plays at all — it needs to weigh attacking a

@@ -1143,6 +1143,7 @@
       alive: true, hasMoved: false, turnDone: false,
       movedThisTurn: false, attacksUsed: 0, usedSacrifice: false, kills: 0,
       usedSurvive: false, usedRevive: false, usedFirstAttack: false,
+      targetBuilding: null,
     };
   }
 
@@ -1158,14 +1159,34 @@
     return buildings.find(b => b.hp > 0 && b.x === x && b.y === y) || null;
   }
 
-  function occupiedSet(excludeUnit) {
+  function occupiedSet(excludeUnit, ignoreTeam) {
     const s = new Set();
-    units.forEach(u => { if (u.alive && u !== excludeUnit) s.add(u.x + ',' + u.y); });
+    units.forEach(u => {
+      if (u.alive && u !== excludeUnit && u.team !== ignoreTeam) s.add(u.x + ',' + u.y);
+    });
     return s;
   }
 
-  function bfsReachable(unit) {
-    const occupied = occupiedSet(unit);
+  // nearestSurvivingBuilding: cheap Manhattan-distance pick of the closest building
+  // still standing, ties broken by array order — same cheap-proxy convention as
+  // blockerBonus below (not true path/hazard-aware geometry). Used both for an
+  // enemy's initial spawn-time assignment and for reassignment once its current
+  // target falls. Returns null if buildingsAlive is empty.
+  function nearestSurvivingBuilding(x, y, buildingsAlive) {
+    let nearest = null, nearestD = Infinity;
+    buildingsAlive.forEach(b => {
+      const d = manhattan(x, y, b.x, b.y);
+      if (d < nearestD) { nearestD = d; nearest = b; }
+    });
+    return nearest;
+  }
+
+  // ignoreTeam lets callers ask "where could I reach if that team's units weren't
+  // blocking?" — used by planEnemyTurn to tell "genuinely blocked by the player"
+  // apart from "just too far away this turn." Since removing blockers can only add
+  // reachable tiles, never remove any, this is always a superset of the real result.
+  function bfsReachable(unit, ignoreTeam) {
+    const occupied = occupiedSet(unit, ignoreTeam);
     // Impassable hazard tiles (pits) and impassable building tiles are folded into
     // the same blocked-tile check as occupied tiles: a normal unit can neither pass
     // through nor land on any of the three, while curse_of_dragon's existing
@@ -1901,6 +1922,48 @@
     return bonus;
   }
 
+  // Picks which reachable-and-in-range-of-the-building tile to land on, once
+  // planEnemyTurn has already confirmed at least one such tile exists — ties
+  // broken by positionalBonus so escort/spacing nudges still apply among
+  // otherwise-equal building-adjacent tiles.
+  function bestBuildingStrikeTile(unit, tiles, building, context) {
+    const inRangeTiles = tiles.filter(t => manhattan(t.x, t.y, building.x, building.y) <= unit.range);
+    let best = inRangeTiles[0], bestBonus = -Infinity;
+    inRangeTiles.forEach(t => {
+      const bonus = positionalBonus(unit, t, context);
+      if (bonus > bestBonus) { bestBonus = bonus; best = t; }
+    });
+    return best;
+  }
+
+  // One attack instance of the pre-rework scoring: hit whatever's most valuable
+  // in range (tierScoreForHit already ranks killBuilding > killUnit > damageBuilding
+  // > damageUnit), or a blank strike if nothing's in range. includeBuildings=false
+  // is used for the "genuinely blocked by the player" case, where the point is to
+  // fight the blocker, not opportunistically snipe some other reachable building.
+  // out is { primaryStrikeTiles, previewStrikeTiles, knockbackTiles }, mutated in
+  // place. Returns false only when boxed in by allies with nothing legal to hit.
+  function planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out) {
+    const inRangeBuildings = includeBuildings ? buildings.filter(b => b.hp > 0 &&
+      manhattan(unit.x, unit.y, b.x, b.y) <= unit.range) : [];
+    const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy').concat(inRangeBuildings);
+    if (inRange.length > 0) {
+      const primary = inRange.slice().sort((a, b) =>
+        tierScoreForHit(unit, fromX, fromY, b, context) - tierScoreForHit(unit, fromX, fromY, a, context)
+      )[0];
+      out.primaryStrikeTiles.push({ x: primary.x, y: primary.y });
+      getAttackTargets(unit, primary).forEach(t => out.previewStrikeTiles.push({ x: t.x, y: t.y }));
+      out.knockbackTiles.push(primary.type === 'building' || !hasKnockback(unit) ? null : knockbackDestination(unit, primary));
+      return true;
+    }
+    const blank = pickBlankStrikeTile(unit);
+    if (!blank) return false; // boxed in by allies on every tile in range — nothing legal to hit
+    out.primaryStrikeTiles.push(blank);
+    out.previewStrikeTiles.push(blank);
+    out.knockbackTiles.push(null);
+    return true;
+  }
+
   // Built fresh at the top of every planEnemyTurn() call (itself called once per
   // round, from startPlayerTurn) — so the escort pick, outnumbered check, and
   // round-based triggers below are always working off the current roster and
@@ -1911,6 +1974,18 @@
     const obj = currentObjective() || { type: 'kill_all' };
     const buildingsAlive = buildings.filter(b => b.hp > 0);
     const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
+
+    // Sticky building assignment: only reassigned when the current target has
+    // fallen (or was never set), not recomputed every round — an enemy doesn't
+    // abandon a target it's already committed to just because a closer building
+    // opened up. When buildingsAlive is empty this leaves/sets targetBuilding to
+    // null for everyone, which planEnemyTurn reads as "no building objective on
+    // this map, fall back to the old behavior."
+    enemyUnits.forEach(u => {
+      if (!u.targetBuilding || u.targetBuilding.hp <= 0) {
+        u.targetBuilding = nearestSurvivingBuilding(u.x, u.y, buildingsAlive);
+      }
+    });
 
     // eliminate_target: the marked unit is one hit from ending the mission, so it
     // gets an escort — whichever other living enemy currently hits hardest —
@@ -1989,10 +2064,21 @@
       const tiles = bfsReachable(unit);
       const fromX = unit.x, fromY = unit.y;
 
+      // Bosses (isBoss) are exempt from the building-priority rework entirely —
+      // their job is hunting down whichever unit is in their team's way, not
+      // attacking buildings themselves, so they keep the original scoring
+      // unconditionally. Missions with no buildings at all (targetBuilding stays
+      // null for everyone, see buildPlanningContext) fall back to the same
+      // original scoring for every unit, since there's no building objective to
+      // pursue on that map.
+      const isBoss = !!UNIT_DATABASE[unit.unitId].isBoss;
+      const useLegacyScoring = isBoss || !unit.targetBuilding;
+
       let dest;
+      let dispatchMode = 'legacy'; // 'legacy' | 'building' | 'blocked' | 'advance'
       if (isRetreat) {
         dest = chooseAIMove(unit, tiles, targets, true);
-      } else {
+      } else if (useLegacyScoring) {
         // Score every reachable tile by the best hit achievable from there, plus
         // any positional pull (escort/spacing) — replacing the old pure-distance
         // destination pick. rawHit (attack potential alone, ignoring positional
@@ -2016,6 +2102,54 @@
           bestTile = chooseAIMove(unit, tiles, fallbackTargets, false);
         }
         dest = bestTile;
+      } else {
+        // The building-priority core: this unit's assigned building always wins
+        // unless the player is physically the only thing standing between it and
+        // that building this turn.
+        const building = unit.targetBuilding;
+        const canHitBuildingReal = tiles.some(t => manhattan(t.x, t.y, building.x, building.y) <= unit.range);
+
+        if (canHitBuildingReal) {
+          dispatchMode = 'building';
+          dest = bestBuildingStrikeTile(unit, tiles, building, context);
+        } else {
+          // Would a tile that puts the building in range be reachable if player
+          // units weren't blocking? If so, they're the specific reason it can't
+          // get there — fight whatever's actually in the way instead. If not,
+          // it's just too far away this turn regardless of blocking, so advance.
+          const tilesIgnoringPlayers = bfsReachable(unit, 'player');
+          const canHitBuildingIgnoringPlayers = tilesIgnoringPlayers.some(
+            t => manhattan(t.x, t.y, building.x, building.y) <= unit.range
+          );
+
+          if (canHitBuildingIgnoringPlayers) {
+            // Restricted to units only (buildingsAlive: []) so this doesn't
+            // opportunistically snipe some other, non-assigned building instead of
+            // fighting the blocker — positionalBonus still sees the real context,
+            // so blockerBonus/escort/spacing keep working unchanged.
+            const unitOnlyContext = Object.assign({}, context, { buildingsAlive: [] });
+            let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
+            for (const tile of tiles) {
+              const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, unitOnlyContext);
+              const total = rawHit + positionalBonus(unit, tile, context);
+              if (total > bestTotal) { bestTotal = total; bestTile = tile; }
+              if (rawHit > bestRawHit) bestRawHit = rawHit;
+            }
+            if (bestRawHit === 0) {
+              // Blocked by the reachability test above, but nothing actually within
+              // weapon range from any reachable tile (rare geometry corner case) —
+              // degrade to a plain advance rather than a fight with nothing to hit.
+              dispatchMode = 'advance';
+              dest = chooseAIMove(unit, tiles, [building], false);
+            } else {
+              dispatchMode = 'blocked';
+              dest = bestTile;
+            }
+          } else {
+            dispatchMode = 'advance';
+            dest = chooseAIMove(unit, tiles, [building], false);
+          }
+        }
       }
 
       unit.x = dest.x;
@@ -2034,37 +2168,46 @@
 
       if (!isRetreat) {
         let attacksLeft = attacksPerTurn(unit);
-        while (attacksLeft > 0) {
-          // Buildings are enemy-only targets, so they're unioned in here rather than
-          // inside enemiesInRange itself — that keeps the player-facing call sites
-          // (selectUnit, handleBoardClick) structurally incapable of ever surfacing
-          // a building in the player's attack highlight.
-          const inRangeBuildings = buildings.filter(b => b.hp > 0 &&
-            manhattan(unit.x, unit.y, b.x, b.y) <= unit.range);
-          const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy').concat(inRangeBuildings);
-          if (inRange.length > 0) {
-            // Ranked by the same tiered score used to pick the destination — kill a
-            // building > kill a unit > damage a building > damage a unit — instead
-            // of the old flat "lowest HP wins", so the attack target is always
-            // whatever's actually most worth hitting rather than just whatever's
-            // weakest.
-            const primary = inRange.slice().sort((a, b) =>
-              tierScoreForHit(unit, fromX, fromY, b, context) - tierScoreForHit(unit, fromX, fromY, a, context)
-            )[0];
-            primaryStrikeTiles.push({ x: primary.x, y: primary.y });
-            getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
-            // A building can't be shoved — skip knockback entirely for a building
-            // primary so the telegraph and execution agree (no shove arrow is ever
-            // shown for a target that can't be moved).
-            knockbackTiles.push(primary.type === 'building' || !hasKnockback(unit) ? null : knockbackDestination(unit, primary));
-          } else {
-            const blank = pickBlankStrikeTile(unit);
-            if (!blank) break; // boxed in by allies on every tile in range — nothing legal to hit
-            primaryStrikeTiles.push(blank);
-            previewStrikeTiles.push(blank);
-            knockbackTiles.push(null);
+        const out = { primaryStrikeTiles, previewStrikeTiles, knockbackTiles };
+
+        if (dispatchMode === 'building') {
+          // Force the building line of attack for as long as it (or another
+          // surviving building also now in range) has predicted HP left — this is
+          // the one case tierScoreForHit's own ranking would get "wrong" relative
+          // to the new priority (today a unit-kill outscores a building chip), so
+          // it's bypassed entirely rather than left to the numeric ranking.
+          const predictedHp = new Map();
+          let currentTarget = unit.targetBuilding;
+          while (attacksLeft > 0) {
+            const hp = predictedHp.has(currentTarget) ? predictedHp.get(currentTarget) : currentTarget.hp;
+            const inRangeNow = hp > 0 && manhattan(unit.x, unit.y, currentTarget.x, currentTarget.y) <= unit.range;
+            if (inRangeNow) {
+              primaryStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
+              previewStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
+              knockbackTiles.push(null); // buildings never take knockback
+              predictedHp.set(currentTarget, hp - estimateDamage(unit, fromX, fromY, currentTarget));
+              attacksLeft -= 1;
+              continue;
+            }
+            const next = context.buildingsAlive.find(b => b !== currentTarget &&
+              (predictedHp.has(b) ? predictedHp.get(b) : b.hp) > 0 &&
+              manhattan(unit.x, unit.y, b.x, b.y) <= unit.range);
+            if (next) { currentTarget = next; continue; }
+            break; // nothing building-side left in range — hand any remaining attacks to standard ranking
           }
-          attacksLeft -= 1;
+          while (attacksLeft > 0) {
+            if (!planStandardAttackInstance(unit, context, fromX, fromY, true, out)) break;
+            attacksLeft -= 1;
+          }
+        } else {
+          // legacy/advance keep considering buildings opportunistically, same as
+          // today; blocked is restricted to units so it stays focused on the fight
+          // it was forced into rather than being pulled off onto some other building.
+          const includeBuildings = dispatchMode !== 'blocked';
+          while (attacksLeft > 0) {
+            if (!planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out)) break;
+            attacksLeft -= 1;
+          }
         }
       }
 
@@ -3450,6 +3593,16 @@
     hoveredTile = null;
 
     placeAITeam(confirmedAiTeam);
+
+    // Every enemy is assigned a fixed building target the moment it spawns —
+    // whichever is nearest to its starting tile — and only ever retargets once that
+    // building falls (see the reassignment in buildPlanningContext). Missions with
+    // no buildings leave this null for everyone, which is what planEnemyTurn reads
+    // as "no building objective exists here, use the old behavior."
+    const spawnBuildingsAlive = buildings.filter(b => b.hp > 0);
+    units.filter(u => u.team === 'enemy').forEach(u => {
+      u.targetBuilding = nearestSurvivingBuilding(u.x, u.y, spawnBuildingsAlive);
+    });
 
     // eliminate_target flags the drafted enemy team's costliest unit (its "ace") as
     // the priority target — decided here, not at objective-roll time, since the
