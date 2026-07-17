@@ -899,6 +899,12 @@
 
   let phase = 'draft'; // 'draft' | 'placement' | 'battle'
   let units = [];
+  // TEMPORARY: flat array of building descriptors for the current battle, populated
+  // by seedDevBuildings() below. This is a placeholder for the "Generate and persist
+  // buildings per node" TODO item, which will replace it with per-node rolled/saved
+  // data (nodeBuildings, mirroring nodeHazards) — at that point this becomes a
+  // currentBuildings()-style accessor instead of a raw global. See seedDevBuildings().
+  let buildings = [];
   let nextId = 1;
   let currentTurn = 'player'; // 'player' | 'enemy'
   let round = 1;
@@ -1123,6 +1129,10 @@
     return units.find(u => u.alive && u.x === x && u.y === y) || null;
   }
 
+  function buildingAt(x, y) {
+    return buildings.find(b => b.hp > 0 && b.x === x && b.y === y) || null;
+  }
+
   function occupiedSet(excludeUnit) {
     const s = new Set();
     units.forEach(u => { if (u.alive && u !== excludeUnit) s.add(u.x + ',' + u.y); });
@@ -1131,12 +1141,18 @@
 
   function bfsReachable(unit) {
     const occupied = occupiedSet(unit);
-    // Impassable hazard tiles (pits) are folded into the same blocked-tile check as
-    // occupied tiles: a normal unit can neither pass through nor land on either kind,
-    // while curse_of_dragon's existing fly-over ability treats both the same way —
-    // passable, but never a valid landing spot.
+    // Impassable hazard tiles (pits) and impassable building tiles are folded into
+    // the same blocked-tile check as occupied tiles: a normal unit can neither pass
+    // through nor land on any of the three, while curse_of_dragon's existing
+    // fly-over ability treats all three the same way — passable, but never a valid
+    // landing spot. A building whose hp has been reduced to 0 no longer blocks (see
+    // the hp > 0 filter below) — nothing can deal that damage yet, but pathing is
+    // already correct for when it can.
     const impassableHazards = new Set(
       currentHazards().filter(h => h.impassable).map(h => h.x + ',' + h.y)
+    );
+    const impassableBuildings = new Set(
+      buildings.filter(b => b.impassable && b.hp > 0).map(b => b.x + ',' + b.y)
     );
     const canPassThrough = unit.unitId === 'curse_of_dragon';
     const start = { x: unit.x, y: unit.y };
@@ -1155,7 +1171,7 @@
         if (n.x < 0 || n.x >= GRID || n.y < 0 || n.y >= GRID) continue;
         const key = n.x + ',' + n.y;
         if (visited.has(key)) continue;
-        const isBlocked = occupied.has(key) || impassableHazards.has(key);
+        const isBlocked = occupied.has(key) || impassableHazards.has(key) || impassableBuildings.has(key);
         if (isBlocked && !canPassThrough) continue;
         visited.set(key, dist + 1);
         queue.push(n);
@@ -1345,9 +1361,45 @@
     }
   }
 
+  // Counterpart to onUnitDeath for a building reaching 0 HP. Deliberately does not
+  // call onUnitDeath: none of its unit-only on-death abilities (sangan/cyber_jar/
+  // man_eater_bug/vorse_raider/baby_dragon/flame_swordsman) apply to a building, and
+  // routing a building through it would incorrectly increment enemyDeaths (a
+  // building isn't an enemy unit) and pollute dark_magician_girl's/insect_queen's
+  // per-death scaling counters, which are meant to count only unit deaths.
+  // Intentionally does not increment attacker.kills — .kills is only ever read for
+  // player-team XP (awardUnitXp), and only enemy attacks can destroy a building, so
+  // an enemy's .kills is never read regardless; left out anyway to keep the field's
+  // meaning ("units killed") honest if that constraint ever loosens.
+  function onBuildingDestroyed(building, attacker) {
+  }
+
   // ---------- Combat ----------
 
   function applyAttackDamage(attacker, defender) {
+    // Buildings have no .alive field — their liveness is hp > 0 only (see
+    // bfsReachable's identical convention) — so this must be checked and returned
+    // from before the unit-only `!defender.alive` check below, which would
+    // otherwise silently no-op every attack against a building.
+    if (defender.type === 'building') {
+      if (defender.hp <= 0) return;
+
+      const variance = 0.85 + Math.random() * 0.3;
+      let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
+      dmg *= outgoingDamageMultiplier(attacker, defender);
+      dmg *= incomingDamageMultiplier(attacker, defender);
+      dmg = Math.max(1, Math.round(dmg));
+
+      defender.hp = Math.max(0, defender.hp - dmg);
+      log(labelOf(attacker) + ' hits the building for ' + dmg + ' dmg.');
+
+      if (defender.hp <= 0) {
+        log('The building is destroyed!');
+        onBuildingDestroyed(defender, attacker);
+      }
+      return;
+    }
+
     if (!defender.alive) return;
 
     if (attacker.unitId === 'reaper_of_the_cards' && defender.hp / defender.maxHp <= 0.2) {
@@ -1421,7 +1473,7 @@
     // has no tile left to be pushed to.
     if (defender.alive && hasKnockback(attacker)) {
       const dest = knockbackDestination(attacker, defender);
-      if (dest && !unitAt(dest.x, dest.y)) {
+      if (dest && !unitAt(dest.x, dest.y) && !buildingAt(dest.x, dest.y)) {
         const pit = currentHazards().find(h => h.x === dest.x && h.y === dest.y && h.impassable && h.lethalOnEntry);
         if (pit) {
           defender.alive = false;
@@ -1439,9 +1491,16 @@
 
   function getAttackTargets(attacker, primaryDefender) {
     if (attacker.unitId === 'dark_magician') {
-      return units.filter(u => u.alive && u.team !== attacker.team &&
+      const unitHits = units.filter(u => u.alive && u.team !== attacker.team &&
         (u.x === attacker.x || u.y === attacker.y) &&
         manhattan(attacker.x, attacker.y, u.x, u.y) <= attacker.range);
+      // Only an enemy-team Dark Magician's row/column splash can ever reach this
+      // point with a building nearby — buildings are enemy-only targets, so no
+      // player-facing call site ever routes a building into getAttackTargets.
+      const buildingHits = buildings.filter(b => b.hp > 0 &&
+        (b.x === attacker.x || b.y === attacker.y) &&
+        manhattan(attacker.x, attacker.y, b.x, b.y) <= attacker.range);
+      return unitHits.concat(buildingHits);
     }
     return [primaryDefender];
   }
@@ -1735,13 +1794,22 @@
       if (!isRetreat) {
         let attacksLeft = attacksPerTurn(unit);
         while (attacksLeft > 0) {
-          const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy');
+          // Buildings are enemy-only targets, so they're unioned in here rather than
+          // inside enemiesInRange itself — that keeps the player-facing call sites
+          // (selectUnit, handleBoardClick) structurally incapable of ever surfacing
+          // a building in the player's attack highlight.
+          const inRangeBuildings = buildings.filter(b => b.hp > 0 &&
+            manhattan(unit.x, unit.y, b.x, b.y) <= unit.range);
+          const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy').concat(inRangeBuildings);
           if (inRange.length > 0) {
             inRange.sort((a, b) => a.hp - b.hp);
             const primary = inRange[0];
             primaryStrikeTiles.push({ x: primary.x, y: primary.y });
             getAttackTargets(unit, primary).forEach(t => previewStrikeTiles.push({ x: t.x, y: t.y }));
-            knockbackTiles.push(hasKnockback(unit) ? knockbackDestination(unit, primary) : null);
+            // A building can't be shoved — skip knockback entirely for a building
+            // primary so the telegraph and execution agree (no shove arrow is ever
+            // shown for a target that can't be moved).
+            knockbackTiles.push(primary.type === 'building' || !hasKnockback(unit) ? null : knockbackDestination(unit, primary));
           } else {
             const blank = pickBlankStrikeTile(unit);
             if (!blank) break; // boxed in by allies on every tile in range — nothing legal to hit
@@ -1825,8 +1893,12 @@
             log(labelOf(unit) + "'s attack falls short.");
             continue;
           }
-          const target = unitAt(strikeTile.x, strikeTile.y);
-          if (!target || target.team !== 'player') {
+          // primaryStrikeTiles is only ever populated from the enemy-only
+          // player-unit/building union above, so whatever's found here (if
+          // anything) is already guaranteed to be a valid target — no team check
+          // needed the way unitAt alone would require.
+          const target = unitAt(strikeTile.x, strikeTile.y) || buildingAt(strikeTile.x, strikeTile.y);
+          if (!target) {
             log(labelOf(unit) + ' strikes empty ground.');
             continue;
           }
@@ -2057,7 +2129,7 @@
       [6, 7].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
     }
 
-    if (phase === 'battle' || phase === 'placement') { drawObjectiveTileMarker(); drawHazardTileMarkers(); }
+    if (phase === 'battle' || phase === 'placement') { drawObjectiveTileMarker(); drawHazardTileMarkers(); drawBuildingTileMarkers(); }
 
     if (selectedUnit && !gameOver) {
       ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
@@ -2136,6 +2208,31 @@
       ctx.lineWidth = 3;
       ctx.setLineDash([2, 3]);
       ctx.strokeRect(h.x * TILE + 4, h.y * TILE + 4, TILE - 8, TILE - 8);
+      ctx.restore();
+    });
+  }
+
+  // Building tiles — drawn in the same early layer as hazards/objectives so units
+  // standing next to one stay fully visible. Solid stroke (not dashed) reads as
+  // "structure" rather than "warning," distinguishing it at a glance from a pit.
+  function drawBuildingTileMarkers() {
+    buildings.forEach(b => {
+      ctx.save();
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.35)';
+      ctx.fillRect(b.x * TILE, b.y * TILE, TILE, TILE);
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(b.x * TILE + 4, b.y * TILE + 4, TILE - 8, TILE - 8);
+
+      if (b.hp < b.maxHp) {
+        const barW = 40, barH = 6;
+        const barX = b.x * TILE + TILE / 2 - barW / 2, barY = b.y * TILE + 6;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+        const pct = b.hp / b.maxHp;
+        ctx.fillStyle = pct > 0.5 ? '#8bac0f' : pct > 0.25 ? '#f0e68c' : '#ef4444';
+        ctx.fillRect(barX, barY, barW * pct, barH);
+      }
       ctx.restore();
     });
   }
@@ -2292,6 +2389,7 @@
   function resetBattleAndDraftState() {
     phase = 'draft';
     units = [];
+    buildings = [];
     nextId = 1;
     currentTurn = 'player';
     round = 1;
@@ -3095,10 +3193,28 @@
     });
   }
 
+  // TEMPORARY dev-only seed for manually testing the building tile-asset foundation
+  // (TODO.md "Add buildings as a protectable tile asset"). Hardcoded, not rolled and
+  // not persisted — this exists purely so the impassable/HP-bearing tile behavior is
+  // testable before real per-node generation exists. Delete this function and its
+  // call site outright once "Generate and persist buildings per node" lands and
+  // buildings is populated from nodeBuildings/currentBuildings() instead.
+  function seedDevBuildings() {
+    const hazardSet = new Set(currentHazards().map(h => h.x + ',' + h.y));
+    const candidates = [
+      { x: 3, y: 3, hp: 12, maxHp: 12 },
+      { x: 4, y: 5, hp: 5, maxHp: 12 }, // pre-damaged, to eyeball the HP bar render
+    ];
+    buildings = candidates
+      .filter(c => !hazardSet.has(c.x + ',' + c.y)) // avoid visual overlap with this node's rolled hazards
+      .map(c => ({ x: c.x, y: c.y, type: 'building', impassable: true, hp: c.hp, maxHp: c.maxHp }));
+  }
+
   function enterPlacementPhase() {
     phase = 'placement';
     units = [];
     nextId = 1;
+    seedDevBuildings();
     pendingPlayerUnits = activeRoster.map(entry => entry.rosterId);
     selectedPlacementRosterId = null;
     selectedUnit = null;
