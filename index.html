@@ -899,11 +899,10 @@
 
   let phase = 'draft'; // 'draft' | 'placement' | 'battle'
   let units = [];
-  // TEMPORARY: flat array of building descriptors for the current battle, populated
-  // by seedDevBuildings() below. This is a placeholder for the "Generate and persist
-  // buildings per node" TODO item, which will replace it with per-node rolled/saved
-  // data (nodeBuildings, mirroring nodeHazards) — at that point this becomes a
-  // currentBuildings()-style accessor instead of a raw global. See seedDevBuildings().
+  // Flat array of building descriptors for the current battle attempt. Populated in
+  // enterPlacementPhase() from a clone of nodeBuildings[currentNode.id] (see
+  // "---------- Buildings ----------" below) — cloned so in-battle HP damage never
+  // mutates the persisted per-node layout.
   let buildings = [];
   let nextId = 1;
   let currentTurn = 'player'; // 'player' | 'enemy'
@@ -1040,6 +1039,57 @@
       hazards[node.id] = rollHazardsForNode(node);
     });
     nodeHazards = hazards;
+  }
+
+  // ---------- Buildings ----------
+  // Each node gets a randomly rolled set of buildings, decided once per run (see
+  // rollNodeBuildings, called from startInitialDraft alongside rollNodeObjectives/
+  // rollNodeHazards) and kept for the rest of that run — a page reload restores it
+  // from the save rather than re-rolling. Keyed by node id: array of tile
+  // descriptors { x, y, type: 'building', impassable, hp, maxHp }. Buildings only
+  // ever roll into the player's own deployment columns (PLAYER_ZONE_X) — unlike
+  // hazards, which explicitly avoid that zone — so they act as cover for the
+  // player's units rather than a contested mid-board objective, and (since they
+  // never touch the middle columns hazards rely on for the connectivity check)
+  // they can never cut off the path between sides either.
+  let nodeBuildings = {};
+
+  // Hardcoded for now; every node gets the same count. Kept as a per-node function
+  // (rather than a bare constant) so a future balance pass can vary this by node
+  // (e.g. off of node.budget, like hazards do) without restructuring the caller.
+  function buildingCountForNode(node) {
+    return 4;
+  }
+
+  function rollBuildingsForNode(node) {
+    const pool = [];
+    PLAYER_ZONE_X.forEach(x => {
+      for (let y = 0; y < GRID; y++) pool.push({ x, y });
+    });
+
+    // If this node's objective is defend_tile, its guarded tile also lives inside
+    // PLAYER_ZONE_X (see buildObjective) — exclude it so a building can never spawn
+    // on top of it and make the enemy physically unable to reach (and thus breach)
+    // the guarded tile.
+    const objective = nodeObjectives[node.id];
+    const excluded = objective && objective.type === 'defend_tile'
+      ? objective.x + ',' + objective.y
+      : null;
+    const candidates = pool.filter(t => (t.x + ',' + t.y) !== excluded);
+
+    const count = Math.min(buildingCountForNode(node), candidates.length);
+    const shuffled = candidates.slice().sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count).map(t => ({
+      x: t.x, y: t.y, type: 'building', impassable: true, hp: 12, maxHp: 12,
+    }));
+  }
+
+  function rollNodeBuildings() {
+    const buildingsByNode = {};
+    MAP_NODES.forEach(node => {
+      buildingsByNode[node.id] = rollBuildingsForNode(node);
+    });
+    nodeBuildings = buildingsByNode;
   }
 
   function objectiveLabel(obj) {
@@ -2510,6 +2560,7 @@
     currentNode = null;
     rollNodeObjectives();
     rollNodeHazards();
+    rollNodeBuildings();
     showScreen('draft');
     missionIndicatorEl.style.display = 'none';
     redraftBtn.style.display = 'none';
@@ -2787,6 +2838,7 @@
       clearedNodes: [...clearedNodes],
       nodeObjectives,
       nodeHazards,
+      nodeBuildings,
     }));
   }
 
@@ -2823,6 +2875,13 @@
         nodeHazards = data.nodeHazards;
       } else {
         rollNodeHazards();
+      }
+      // Older saves predate buildings entirely — roll fresh rather than leaving
+      // every node without any.
+      if (data.nodeBuildings && Object.keys(data.nodeBuildings).length) {
+        nodeBuildings = data.nodeBuildings;
+      } else {
+        rollNodeBuildings();
       }
       return true;
     } catch (e) {
@@ -3193,28 +3252,13 @@
     });
   }
 
-  // TEMPORARY dev-only seed for manually testing the building tile-asset foundation
-  // (TODO.md "Add buildings as a protectable tile asset"). Hardcoded, not rolled and
-  // not persisted — this exists purely so the impassable/HP-bearing tile behavior is
-  // testable before real per-node generation exists. Delete this function and its
-  // call site outright once "Generate and persist buildings per node" lands and
-  // buildings is populated from nodeBuildings/currentBuildings() instead.
-  function seedDevBuildings() {
-    const hazardSet = new Set(currentHazards().map(h => h.x + ',' + h.y));
-    const candidates = [
-      { x: 3, y: 3, hp: 12, maxHp: 12 },
-      { x: 4, y: 5, hp: 5, maxHp: 12 }, // pre-damaged, to eyeball the HP bar render
-    ];
-    buildings = candidates
-      .filter(c => !hazardSet.has(c.x + ',' + c.y)) // avoid visual overlap with this node's rolled hazards
-      .map(c => ({ x: c.x, y: c.y, type: 'building', impassable: true, hp: c.hp, maxHp: c.maxHp }));
-  }
-
   function enterPlacementPhase() {
     phase = 'placement';
     units = [];
     nextId = 1;
-    seedDevBuildings();
+    // Clone so in-battle HP damage never mutates the persisted per-node layout —
+    // each new attempt at this node starts every building back at full HP.
+    buildings = (nodeBuildings[currentNode.id] || []).map(b => ({ ...b }));
     pendingPlayerUnits = activeRoster.map(entry => entry.rosterId);
     selectedPlacementRosterId = null;
     selectedUnit = null;
@@ -3290,7 +3334,7 @@
       return;
     }
 
-    if (!occupant && selectedPlacementRosterId != null && PLAYER_ZONE_X.includes(tx)) {
+    if (!occupant && !buildingAt(tx, ty) && selectedPlacementRosterId != null && PLAYER_ZONE_X.includes(tx)) {
       const entry = activeRoster.find(e => e.rosterId === selectedPlacementRosterId);
       units.push(makeUnit('player', entry.unitId, tx, ty, entry.rosterId, entry.level));
       pendingPlayerUnits = pendingPlayerUnits.filter(rid => rid !== selectedPlacementRosterId);
@@ -3306,7 +3350,7 @@
       const empty = [];
       for (const x of PLAYER_ZONE_X) {
         for (let y = 0; y < GRID; y++) {
-          if (!unitAt(x, y)) empty.push({ x, y });
+          if (!unitAt(x, y) && !buildingAt(x, y)) empty.push({ x, y });
         }
       }
       if (empty.length === 0) return;

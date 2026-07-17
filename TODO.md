@@ -59,11 +59,12 @@ is a real dependency for the next rather than just a suggested sequence.
       assumes exactly two teams, `'player'` and `'enemy'`. Buildings are a third,
       damageable category that needs to be real everywhere an attack gets resolved —
       not just something the AI is aware of.
-- [ ] **Generate and persist buildings per node**: same shape as the existing hazard-roll
+- [x] **Generate and persist buildings per node**: same shape as the existing hazard-roll
       system (`rollHazardsForNode`/`nodeHazards`) — roll count/placement/HP once per node
       and save it, so a mid-run reload doesn't re-roll buildings out from under the
-      player.
-- [ ] **Render buildings and add a building-status HUD element**: buildings need a board
+      player. Confined to the player's own deployment columns (`PLAYER_ZONE_X`) rather
+      than the middle of the board, for cover rather than a contested objective.
+- [x] **Render buildings and add a building-status HUD element**: buildings need a board
       sprite distinct from unit sprites, plus something like the round-counter/
       turn-indicator pair to show remaining building count/HP at a glance.
 - [ ] **Refactor win/lose conditions around building collapse**: layer "all your buildings
