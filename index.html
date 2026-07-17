@@ -369,6 +369,22 @@
 
   .map-node.cleared:hover { border-color: #55557a; }
 
+  .map-node.boss {
+    border-color: #b91c1c;
+    box-shadow: 0 0 8px rgba(185,28,28,0.5);
+  }
+
+  .map-node.boss:hover { border-color: #ef4444; }
+
+  .map-node.locked {
+    cursor: default;
+    opacity: 0.55;
+    background: #1c1c2a;
+    border-color: #3a3a4e;
+  }
+
+  .map-node.locked:hover { border-color: #3a3a4e; }
+
   .map-node-name {
     font-size: 11px;
     letter-spacing: 1px;
@@ -591,7 +607,7 @@
 </div>
 
 <div id="map-screen" class="hidden">
-  <h1 class="title">SELECT A MISSION</h1>
+  <h1 class="title" id="map-title">SELECT A MISSION</h1>
   <div class="panel">
     <div id="map-canvas"></div>
   </div>
@@ -780,10 +796,31 @@
     { id: 'ancient_egypt', name: 'Ancient Egypt', budget: 15, x: 25, y: 88, act: 1 },
     { id: 'doma', name: 'Doma', budget: 16, x: 88, y: 82, act: 1 },
     { id: 'shadow_realm', name: 'Shadow Realm', budget: 16, x: 60, y: 85, act: 1 },
+    // A boss node: a scripted boss unit (see draftBossTeam) instead of a normal
+    // budget draft, free of this budget rather than spent from it. Any node
+    // flagged `boss: true` is locked (see isNodeUnlocked) until every other node
+    // in its own act is cleared — this pattern generalizes to future acts without
+    // further changes, each just adding its own boss node.
+    { id: 'ceremonial_battle', name: 'Ceremonial Battle', budget: 24, x: 50, y: 50, act: 1, boss: true },
   ];
 
   function nodesForAct(actId) {
     return MAP_NODES.filter(node => node.act === actId);
+  }
+
+  // Dev/test shortcut: tapping the map title 5x in a row (see mapTitleEl listener)
+  // flips this on for the rest of the session, bypassing every lock check below so
+  // any node — including a boss node — is reachable without clearing the run for
+  // real. Deliberately in-memory only (not saved), so a reload resets it.
+  let debugUnlockAll = false;
+
+  // A boss node unlocks once every non-boss node in its own act is cleared. Every
+  // other node is always unlocked (as long as its act is). Like isActUnlocked,
+  // derived from clearedNodes on every call — no separate save/migration needed.
+  function isNodeUnlocked(node) {
+    if (debugUnlockAll) return true;
+    if (!node.boss) return true;
+    return nodesForAct(node.act).every(n => n.boss || clearedNodes.has(n.id));
   }
 
   // An act is unlocked once every node in the act immediately before it (in ACTS
@@ -791,6 +828,7 @@
   // from clearedNodes on every call rather than stored, so no save data or
   // migration is needed to support acts.
   function isActUnlocked(actId) {
+    if (debugUnlockAll) return true;
     const index = ACTS.findIndex(act => act.id === actId);
     if (index <= 0) return true;
     const previousAct = ACTS[index - 1];
@@ -834,6 +872,7 @@
   const winScreenEl = document.getElementById('win-screen');
   const winRestartBtn = document.getElementById('win-restart-btn');
   const mapScreenEl = document.getElementById('map-screen');
+  const mapTitleEl = document.getElementById('map-title');
   const draftScreenEl = document.getElementById('draft-screen');
   const recruitScreenEl = document.getElementById('recruit-screen');
   const squadScreenEl = document.getElementById('squad-screen');
@@ -1246,6 +1285,13 @@
       if (defender.team === 'player') playerInsectDeaths += 1; else enemyInsectDeaths += 1;
     }
     attacker.kills += 1;
+
+    // Black Luster Soldier grows from any death on the field this battle, not just
+    // its own kills — allies and enemies alike feed it.
+    units.filter(u => u.alive && u.unitId === 'black_luster_soldier').forEach(bls => {
+      bls.atk += 5;
+      log(labelOf(bls) + ' grows stronger! (+5 ATK)');
+    });
 
     if (attacker.unitId === 'vorse_raider') {
       const gain = Math.round(defender.atk * 0.15);
@@ -1660,10 +1706,23 @@
     const tileLure = (obj && obj.type === 'defend_tile') ? [{ x: obj.x, y: obj.y }] : [];
 
     for (const unit of enemyUnits) {
-      const targets = units.filter(u => u.team === 'player' && u.alive).concat(tileLure);
+      const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
+      // focusLowestHP (currently only boss units) locks onto a single target — the
+      // lowest-HP living player unit — instead of gravitating toward whichever
+      // target is nearest, so it reads as deliberate focus fire rather than the
+      // default nearest-target heuristic every other unit uses. Overrides the
+      // defend_tile lure too, since a boss single-mindedly hunting the weakest
+      // target is the point of the flag.
+      const focusLowestHP = !!UNIT_DATABASE[unit.unitId].focusLowestHP;
+      const targets = focusLowestHP
+        ? alivePlayers.slice().sort((a, b) => a.hp - b.hp).slice(0, 1)
+        : alivePlayers.concat(tileLure);
       if (targets.length === 0) break;
 
-      const isRetreat = unit.hp / unit.maxHp < 0.3;
+      // neverRetreat (currently only boss units) ignores the low-HP retreat
+      // instinct every other enemy has — a boss keeps pressing the attack no
+      // matter how badly hurt it is.
+      const isRetreat = !UNIT_DATABASE[unit.unitId].neverRetreat && unit.hp / unit.maxHp < 0.3;
       const tiles = bfsReachable(unit);
       const dest = chooseAIMove(unit, tiles, targets, isRetreat);
 
@@ -1848,6 +1907,29 @@
         const dmg = 5;
         t.hp = Math.max(0, t.hp - dmg);
         log(labelOf(u) + "'s energy field burns " + labelOf(t) + ' for ' + dmg + ' dmg.');
+        if (t.hp <= 0) {
+          t.alive = false;
+          log(labelOf(t) + ' is destroyed!');
+          onUnitDeath(t, u);
+        }
+      });
+    });
+
+    // Chaos Emperor Dragon detonates on a fixed 5-round cadence (round % 5 === 0)
+    // rather than any HP/random trigger, so its telegraph is fully predictable —
+    // every enemy turn logs a countdown to the next detonation, in keeping with
+    // this game's rule that enemy threats are always shown before they land (see
+    // the Jinzo telegraph fix noted in TODO.md).
+    units.filter(u => u.alive && u.team === team && u.unitId === 'chaos_emperor_dragon').forEach(u => {
+      const turnsUntilDetonation = (5 - (round % 5)) % 5;
+      if (turnsUntilDetonation > 0) {
+        log(labelOf(u) + ': shockwave in ' + turnsUntilDetonation + (turnsUntilDetonation === 1 ? ' turn.' : ' turns.'));
+        return;
+      }
+      log(labelOf(u) + ' unleashes a shockwave! All units on the board take 20 damage.');
+      units.filter(t => t.alive).forEach(t => {
+        const dmg = 20;
+        t.hp = Math.max(0, t.hp - dmg);
         if (t.hp <= 0) {
           t.alive = false;
           log(labelOf(t) + ' is destroyed!');
@@ -2395,15 +2477,21 @@
 
       nodesForAct(act.id).forEach(node => {
         const cleared = clearedNodes.has(node.id);
+        const locked = !cleared && !isNodeUnlocked(node);
         const el = document.createElement('div');
-        el.className = 'map-node' + (cleared ? ' cleared' : '');
+        el.className = 'map-node' +
+          (node.boss ? ' boss' : '') +
+          (cleared ? ' cleared' : '') +
+          (locked ? ' locked' : '');
         el.style.left = node.x + '%';
         el.style.top = node.y + '%';
         el.innerHTML =
           '<div class="map-node-name">' + node.name + '</div>' +
-          '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
-          (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
-        if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
+          '<div class="map-node-budget">' +
+            (cleared ? 'CLEARED' : locked ? 'LOCKED' : 'BUDGET ' + node.budget) +
+          '</div>' +
+          (cleared || locked ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
+        if (!cleared && !locked) el.addEventListener('click', () => enterDraftForNode(node));
         actCanvas.appendChild(el);
       });
 
@@ -2431,6 +2519,24 @@
   });
 
   mapBackBtn.addEventListener('click', () => showScreen('home'));
+
+  // Dev/test shortcut: tap the map title 5x in a row (each tap resets a 2s window)
+  // to flip on debugUnlockAll for the rest of the session — see
+  // isNodeUnlocked/isActUnlocked. Not a real gameplay feature, just a fast way to
+  // reach any node (a boss node especially) without clearing a run for real.
+  let mapTitleTapCount = 0;
+  let mapTitleTapResetTimer = null;
+  mapTitleEl.addEventListener('click', () => {
+    if (debugUnlockAll) return;
+    mapTitleTapCount += 1;
+    clearTimeout(mapTitleTapResetTimer);
+    mapTitleTapResetTimer = setTimeout(() => { mapTitleTapCount = 0; }, 2000);
+    if (mapTitleTapCount >= 5) {
+      debugUnlockAll = true;
+      mapTitleEl.textContent = 'SELECT A MISSION — TEST MODE';
+      renderMap();
+    }
+  });
 
   // ---------- Persistent Roster ----------
   // Owned across the whole run: persists across encounters (win or lose), and is
@@ -2556,9 +2662,11 @@
     return ids;
   }
 
-  // All units on a given side, or every unit for 'any' (Mixed mode).
+  // All units on a given side, or every unit for 'any' (Mixed mode). isBoss units
+  // are always excluded — they're never drafted/recruited normally, only placed
+  // directly by draftBossTeam for a boss node.
   function unitIdsForSide(side) {
-    const all = Object.keys(UNIT_DATABASE);
+    const all = Object.keys(UNIT_DATABASE).filter(id => !UNIT_DATABASE[id].isBoss);
     return side === 'any' ? all : all.filter(id => UNIT_DATABASE[id].side === side);
   }
 
@@ -2826,19 +2934,36 @@
     return selectedPlayerUnits.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
   }
 
-  function draftAITeam(budget) {
-    const team = [];
+  // Randomly fills `team` (already possibly seeded, e.g. with a boss unit) with
+  // units from `pool` whose cost fits under `budget`, greedily until nothing left
+  // fits. Mutates and returns `team`.
+  function fillTeamUnderBudget(team, pool, budget) {
     let remaining = budget;
-    const sidePool = unitIdsForSide(opposingSide(playerSide));
     while (true) {
-      const pool = sidePool
-        .filter(id => !team.includes(id) && UNIT_DATABASE[id].cost <= remaining);
-      if (pool.length === 0) break;
-      const pick = pool[Math.floor(Math.random() * pool.length)];
+      const available = pool.filter(id => !team.includes(id) && UNIT_DATABASE[id].cost <= remaining);
+      if (available.length === 0) break;
+      const pick = available[Math.floor(Math.random() * available.length)];
       team.push(pick);
       remaining -= UNIT_DATABASE[pick].cost;
     }
     return team;
+  }
+
+  function draftAITeam(budget) {
+    return fillTeamUnderBudget([], unitIdsForSide(opposingSide(playerSide)), budget);
+  }
+
+  // A boss unit is the fixed, free centerpiece of a boss node — placed before
+  // budget accounting starts, so it never eats into node.budget the way a support
+  // unit would. Side is resolved the same way draftAITeam resolves its pool
+  // (opposingSide(playerSide)), except Mixed mode has no fixed hero/rival split to
+  // read a boss off, so it's rolled at random per draft instead.
+  const BOSS_UNITS = { hero: 'black_luster_soldier', rival: 'chaos_emperor_dragon' };
+
+  function draftBossTeam(node) {
+    const side = opposingSide(playerSide);
+    const bossSide = side === 'any' ? (Math.random() < 0.5 ? 'hero' : 'rival') : side;
+    return fillTeamUnderBudget([BOSS_UNITS[bossSide]], unitIdsForSide(side), node.budget);
   }
 
   function renderMissionIndicator() {
@@ -2896,7 +3021,7 @@
     const total = teamIds.reduce((sum, id) => sum + UNIT_DATABASE[id].cost, 0);
     const rows = teamIds.map(id => {
       const u = UNIT_DATABASE[id];
-      return '<div class="stat-row"><span>' + u.name + '</span><span>' + u.cost + '</span></div>';
+      return '<div class="stat-row"><span>' + u.name + (u.isBoss ? ' (BOSS)' : '') + '</span><span>' + u.cost + '</span></div>';
     }).join('');
     return (
       '<div class="roster-label">' + label + '</div>' +
@@ -2915,11 +3040,17 @@
       return;
     }
 
-    confirmedAiTeam = draftAITeam(currentNode.budget);
+    confirmedAiTeam = currentNode.boss ? draftBossTeam(currentNode) : draftAITeam(currentNode.budget);
+    // The boss itself is free (not spent from node.budget), so the displayed
+    // enemy budget is bumped by its cost too — otherwise the total would read as
+    // over budget even though that's by design (see draftBossTeam).
+    const enemyBudget = currentNode.boss
+      ? currentNode.budget + UNIT_DATABASE[confirmedAiTeam[0]].cost
+      : currentNode.budget;
     resultsContentEl.innerHTML =
       '<div class="objective-banner">' + objectiveDescription(currentObjective()) + '</div>' +
       rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
-      rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, currentNode.budget);
+      rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, enemyBudget);
     pickerPanelEl.style.display = 'none';
     confirmTeamBtn.style.display = 'none';
     resultsPanelEl.style.display = 'block';

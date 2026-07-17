@@ -16,6 +16,13 @@
 // AI's pools to their respective 16 units; Mixed mode ignores this field entirely.
 // Not an even split by design; more units will fill out whichever side is thin as
 // the roster grows.
+//
+// isBoss marks a unit as a scripted act-capstone monster (see the boss node in
+// MAP_NODES, index.html): excluded from unitIdsForSide entirely, so it never
+// appears in the player's draft pool, the recruit pool, or a normal AI budget
+// draft — it's placed directly by draftBossTeam instead, free of that node's
+// budget. neverRetreat/focusLowestHP are AI-behavior flags consumed by
+// planEnemyTurn, also currently only set on boss units.
 
 const UNIT_DATABASE = {
   baby_dragon: {
@@ -54,6 +61,21 @@ const UNIT_DATABASE = {
     side: 'hero',
     effect: "Takes 30% less damage on turns it doesn't move.",
   },
+  black_luster_soldier: {
+    name: 'Black Luster Soldier',
+    cost: 8,
+    hp: 400,
+    atk: 48,
+    move: 3,
+    range: 1,
+    type: 'Warrior',
+    attribute: 'LIGHT',
+    side: 'hero',
+    isBoss: true,
+    neverRetreat: true,
+    focusLowestHP: true,
+    effect: 'Gains +5 ATK permanently for every unit destroyed this battle, ally or enemy. Never retreats, and always presses toward whichever enemy has the lowest current HP.',
+  },
   blue_eyes_white_dragon: {
     name: 'Blue-Eyes White Dragon',
     cost: 8,
@@ -77,6 +99,21 @@ const UNIT_DATABASE = {
     attribute: 'EARTH',
     side: 'hero',
     effect: 'If it survives being attacked by an adjacent enemy, strikes back for 50% of its ATK.',
+  },
+  chaos_emperor_dragon: {
+    name: 'Chaos Emperor Dragon',
+    cost: 8,
+    hp: 325,
+    atk: 56,
+    move: 2,
+    range: 1,
+    type: 'Dragon',
+    attribute: 'DARK',
+    side: 'rival',
+    isBoss: true,
+    neverRetreat: true,
+    focusLowestHP: true,
+    effect: 'Every 5 rounds, unleashes a shockwave dealing 20 damage to every unit on the board, ally and enemy alike. Never retreats, and always presses toward whichever enemy has the lowest current HP.',
   },
   curse_of_dragon: {
     name: 'Curse of Dragon',
