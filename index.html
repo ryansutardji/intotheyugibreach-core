@@ -1246,8 +1246,29 @@
     return result;
   }
 
+  // Line fire: walks outward from (x,y) along each of the 4 cardinal directions,
+  // up to `range` tiles, and stops at the first unit it finds in that direction —
+  // whether ally or enemy. Only an enemy stopping the line counts as a hittable
+  // target; a friendly unit in the way blocks the shot from reaching anything
+  // beyond it, same as an enemy would, but isn't itself a valid target. Replaces
+  // the old Manhattan-radius reach, so a target must share the attacker's row or
+  // column and have a clear path down it, not just be within `range` tiles as the
+  // crow flies.
   function enemiesInRange(x, y, range, team) {
-    return units.filter(u => u.alive && u.team !== team && manhattan(x, y, u.x, u.y) <= range);
+    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    const result = [];
+    dirs.forEach(([dx, dy]) => {
+      for (let dist = 1; dist <= range; dist++) {
+        const tx = x + dx * dist, ty = y + dy * dist;
+        if (tx < 0 || tx >= GRID || ty < 0 || ty >= GRID) break;
+        const blocker = unitAt(tx, ty);
+        if (blocker) {
+          if (blocker.team !== team) result.push(blocker);
+          break;
+        }
+      }
+    });
+    return result;
   }
 
   function log(msg) {
