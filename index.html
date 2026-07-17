@@ -949,7 +949,14 @@
   function rollNodeObjectives() {
     const objectives = {};
     MAP_NODES.forEach(node => {
-      const type = OBJECTIVE_TYPES[Math.floor(Math.random() * OBJECTIVE_TYPES.length)];
+      // Boss nodes always roll eliminate_target — the win condition is always
+      // "defeat the boss", never survive/timed_clear/kill_all — since the boss is
+      // the whole point of the node. The priority target itself gets pinned to the
+      // boss unit specifically (not the usual random-costliest-enemy pick) once the
+      // node is actually drafted, in confirmBattle.
+      const type = node.boss
+        ? 'eliminate_target'
+        : OBJECTIVE_TYPES[Math.floor(Math.random() * OBJECTIVE_TYPES.length)];
       objectives[node.id] = buildObjective(type, node);
     });
     nodeObjectives = objectives;
@@ -1077,21 +1084,28 @@
     nodeBuildings = buildingsByNode;
   }
 
-  function objectiveLabel(obj) {
+  // Boss nodes are always eliminate_target (see rollNodeObjectives) but read out
+  // as "defeat the boss" rather than the generic VIP wording used for an ordinary
+  // node's random ace unit — isBossNode lets these three helpers special-case just
+  // that one objective type without every other case needing to know boss nodes
+  // exist.
+  function objectiveLabel(obj, isBossNode) {
     switch (obj.type) {
       case 'survive_rounds': return 'SURVIVE ' + obj.rounds;
-      case 'eliminate_target': return 'VIP';
+      case 'eliminate_target': return isBossNode ? 'BOSS' : 'VIP';
       case 'timed_clear': return 'CLEAR IN ' + obj.rounds;
       default: return 'ELIMINATE ALL';
     }
   }
 
-  function objectiveDescription(obj) {
+  function objectiveDescription(obj, isBossNode) {
     switch (obj.type) {
       case 'survive_rounds':
         return 'SURVIVE: hold out for ' + obj.rounds + ' rounds. You win the moment you reach it, even with enemies still standing.';
       case 'eliminate_target':
-        return "ELIMINATE: the enemy's priority target (marked on the field) must die — destroying it wins the mission instantly, regardless of the rest of their team.";
+        return isBossNode
+          ? 'DEFEAT THE BOSS: the boss (marked on the field) must die — destroying it wins the mission instantly, regardless of the rest of its escort.'
+          : "ELIMINATE: the enemy's priority target (marked on the field) must die — destroying it wins the mission instantly, regardless of the rest of their team.";
       case 'timed_clear':
         return 'CLEAR: eliminate every enemy within ' + obj.rounds + ' rounds, or the mission ends in defeat even if your squad is untouched.';
       default:
@@ -1099,10 +1113,10 @@
     }
   }
 
-  function objectiveVictoryText(obj) {
+  function objectiveVictoryText(obj, isBossNode) {
     switch (obj.type) {
       case 'survive_rounds': return 'You outlasted them.';
-      case 'eliminate_target': return 'The priority target is down.';
+      case 'eliminate_target': return isBossNode ? 'The boss is down.' : 'The priority target is down.';
       case 'timed_clear': return 'Cleared with time to spare.';
       default: return '';
     }
@@ -1600,7 +1614,7 @@
 
     if (victory) {
       bannerTextEl.textContent = 'VICTORY';
-      const victoryPrefix = objectiveVictoryText(obj);
+      const victoryPrefix = objectiveVictoryText(obj, !!(currentNode && currentNode.boss));
       bannerSubEl.textContent = (victoryPrefix ? victoryPrefix + ' ' : '') + currentNode.name + ' secured.';
       starChips += currentNode.budget;
       bannerSubEl.textContent += ' +' + currentNode.budget + ' Star Chips earned.';
@@ -2072,12 +2086,14 @@
       // Bosses (isBoss) are exempt from the building-priority rework entirely —
       // their job is hunting down whichever unit is in their team's way, not
       // attacking buildings themselves, so they keep the original scoring
-      // unconditionally. Missions with no buildings at all (targetBuilding stays
-      // null for everyone, see buildPlanningContext) fall back to the same
-      // original scoring for every unit, since there's no building objective to
-      // pursue on that map.
+      // unconditionally, with buildings scrubbed out of the context they score
+      // against (scoringContext below) so they never even opportunistically snipe
+      // one. Missions with no buildings at all (targetBuilding stays null for
+      // everyone, see buildPlanningContext) fall back to the same original scoring
+      // for every unit, since there's no building objective to pursue on that map.
       const isBoss = !!UNIT_DATABASE[unit.unitId].isBoss;
       const useLegacyScoring = isBoss || !unit.targetBuilding;
+      const scoringContext = isBoss ? Object.assign({}, context, { buildingsAlive: [] }) : context;
 
       let dest;
       let dispatchMode = 'legacy'; // 'legacy' | 'building' | 'blocked' | 'advance'
@@ -2092,8 +2108,8 @@
         // not just because some tile's positional bonus made its total positive.
         let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
         for (const tile of tiles) {
-          const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, context);
-          const total = rawHit + positionalBonus(unit, tile, context);
+          const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, scoringContext);
+          const total = rawHit + positionalBonus(unit, tile, scoringContext);
           if (total > bestTotal) { bestTotal = total; bestTile = tile; }
           if (rawHit > bestRawHit) bestRawHit = rawHit;
         }
@@ -2101,9 +2117,11 @@
           // No reachable tile puts anything in range this turn — beeline toward
           // the nearest surviving building instead of the nearest player unit, and
           // only fall back to players if there are no buildings left on the field
-          // at all. Reuses chooseAIMove's existing distance logic unchanged, just
-          // fed a buildings-first candidate list.
-          const fallbackTargets = context.buildingsAlive.length ? context.buildingsAlive : targets;
+          // at all (bosses always take this second branch straight away, since
+          // scoringContext already scrubbed buildingsAlive to empty for them).
+          // Reuses chooseAIMove's existing distance logic unchanged, just fed a
+          // buildings-first candidate list.
+          const fallbackTargets = scoringContext.buildingsAlive.length ? scoringContext.buildingsAlive : targets;
           bestTile = chooseAIMove(unit, tiles, fallbackTargets, false);
         }
         dest = bestTile;
@@ -2207,8 +2225,10 @@
         } else {
           // legacy/advance keep considering buildings opportunistically, same as
           // today; blocked is restricted to units so it stays focused on the fight
-          // it was forced into rather than being pulled off onto some other building.
-          const includeBuildings = dispatchMode !== 'blocked';
+          // it was forced into rather than being pulled off onto some other
+          // building. Bosses never consider buildings at all, even opportunistically
+          // — they exist purely to hunt down player units (see scoringContext above).
+          const includeBuildings = dispatchMode !== 'blocked' && !isBoss;
           while (attacksLeft > 0) {
             if (!planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out)) break;
             attacksLeft -= 1;
@@ -2992,7 +3012,7 @@
         el.innerHTML =
           '<div class="map-node-name">' + node.name + '</div>' +
           '<div class="map-node-budget">' + (cleared ? 'CLEARED' : 'BUDGET ' + node.budget) + '</div>' +
-          (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }) + '</div>');
+          (cleared ? '' : '<div class="map-node-objective">' + objectiveLabel(nodeObjectives[node.id] || { type: 'kill_all' }, node.boss) + '</div>');
         if (!cleared) el.addEventListener('click', () => enterDraftForNode(node));
         actCanvas.appendChild(el);
       });
@@ -3483,7 +3503,7 @@
   function renderMissionIndicator() {
     missionNameEl.textContent = currentNode.name;
     missionBudgetEl.textContent = currentNode.budget;
-    missionObjectiveEl.textContent = objectiveDescription(currentObjective());
+    missionObjectiveEl.textContent = objectiveDescription(currentObjective(), currentNode.boss);
   }
 
   function renderUnitGrid() {
@@ -3562,7 +3582,7 @@
       ? currentNode.budget + UNIT_DATABASE[confirmedAiTeam[0]].cost
       : currentNode.budget;
     resultsContentEl.innerHTML =
-      '<div class="objective-banner">' + objectiveDescription(currentObjective()) + '</div>' +
+      '<div class="objective-banner">' + objectiveDescription(currentObjective(), currentNode.boss) + '</div>' +
       rosterHtml('YOUR TEAM', selectedPlayerUnits, budgetCap) +
       rosterHtml('ENEMY TEAM (' + currentNode.name + ')', confirmedAiTeam, enemyBudget);
     pickerPanelEl.style.display = 'none';
@@ -3649,16 +3669,25 @@
 
     // eliminate_target flags the drafted enemy team's costliest unit (its "ace") as
     // the priority target — decided here, not at objective-roll time, since the
-    // enemy roster itself isn't known until the node is actually drafted.
+    // enemy roster itself isn't known until the node is actually drafted. Boss
+    // nodes (always eliminate_target, see rollNodeObjectives) instead pin the
+    // target to the boss unit itself, and skip the VIP HP-doubling below — the
+    // boss is already the toughest thing on the field by design (see its
+    // scripted hp in units-db.js), it doesn't need the ordinary VIP buff too.
     const obj = currentObjective();
     if (obj && obj.type === 'eliminate_target') {
       const enemies = units.filter(u => u.team === 'enemy' && u.alive);
-      const maxCost = Math.max(...enemies.map(u => u.cost));
-      const candidates = enemies.filter(u => u.cost === maxCost);
-      const priorityTarget = candidates[Math.floor(Math.random() * candidates.length)];
-      priorityTarget.isPriorityTarget = true;
-      priorityTarget.maxHp *= 2;
-      priorityTarget.hp *= 2;
+      if (currentNode.boss) {
+        const boss = enemies.find(u => UNIT_DATABASE[u.unitId].isBoss);
+        if (boss) boss.isPriorityTarget = true;
+      } else {
+        const maxCost = Math.max(...enemies.map(u => u.cost));
+        const candidates = enemies.filter(u => u.cost === maxCost);
+        const priorityTarget = candidates[Math.floor(Math.random() * candidates.length)];
+        priorityTarget.isPriorityTarget = true;
+        priorityTarget.maxHp *= 2;
+        priorityTarget.hp *= 2;
+      }
     }
 
     renderLegend();
@@ -3765,7 +3794,7 @@
     const obj = currentObjective();
 
     battleLogEl.innerHTML = '';
-    log('Battle begins! ' + objectiveDescription(obj || { type: 'kill_all' }));
+    log('Battle begins! ' + objectiveDescription(obj || { type: 'kill_all' }, currentNode.boss));
     enemyPlan = planEnemyTurn();
     render();
   }

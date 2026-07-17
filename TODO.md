@@ -25,7 +25,7 @@
       flavor (e.g. a tile that stalls a unit for a turn, or applies damage-over-time instead
       of instant death) would make knockback pushes a real decision (kill vs. tempo) instead
       of a single binary outcome.
-- [ ] **Give boss nodes distinct AI behavior**: the enemy AI is currently one greedy
+- [x] **Give boss nodes distinct AI behavior**: the enemy AI is currently one greedy
       heuristic for every unit (nearest-target Manhattan distance, `index.html:1595-1616`) —
       no role-based prioritization, no bespoke patterns. Ties directly into the **Boss
       nodes** item above: a boss with a scripted, still-telegraphed-but-distinct behavior
@@ -38,6 +38,11 @@
       Insect Queen's Insect-death counter) rather than a generic synergy system. Lower
       priority and more speculative than the items above, but the most under-used axis for
       future draft-time build-crafting/replayability.
+- [ ] **Turn on knockback, including into buildings**: activates the already-wired
+      knockback system (see the **Turn on knockback** item above) and additionally
+      decides what a push into a building tile actually does — blocked like a wall, or
+      collision damage like Into the Breach's mountains — now that buildings are a real
+      obstacle on the board.
 
 ## Buildings-as-objectives overhaul
 
@@ -78,11 +83,7 @@ is a real dependency for the next rather than just a suggested sequence.
       with no concept of a target that isn't a player unit. Without this, buildings
       existing doesn't change how the AI plays at all — it needs to weigh attacking a
       building against attacking a player unit.
-- [ ] **Turn on knockback, including into buildings**: activates the already-wired
-      knockback system (see the **Turn on knockback** item above) and additionally
-      decides what a push into a building tile actually does — blocked like a wall, or
-      collision damage like Into the Breach's mountains — now that buildings are a real
-      obstacle on the board.
+
 - [ ] **Rework ranged attacks (range 2+) into row/column line fire**: replace
       Manhattan-radius single-target reach with a line attack down the unit's row/column,
       the way Into the Breach's ranged units work. Requires deciding piercing (hits
