@@ -534,9 +534,158 @@
   }
 
   .unit-card.empty-slot:hover { border-color: #44445a; }
+
+  .unit-db-fab {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 500;
+    flex: none;
+    width: auto;
+    background: #26263a;
+    border-color: #8bac0f;
+    color: #9bbc0f;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .unit-db-fab:hover { background: #2f4a1f; }
+
+  #unit-db-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+    background: rgba(10, 10, 20, 0.86);
+  }
+
+  #unit-db-overlay.hidden { display: none; }
+
+  .unit-db-panel {
+    width: 100%;
+    max-width: 1000px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #1a1a2e;
+    padding: 16px;
+    border: 4px solid #44445a;
+    box-shadow: 0 0 0 4px #0f0f1a, 0 0 24px rgba(0,0,0,0.6);
+  }
+
+  .unit-db-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .unit-db-header h1.title { flex: 1; }
+  .unit-db-header button { flex: none; padding: 10px 16px; }
+
+  .unit-db-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: flex-end;
+    background: #26263a;
+    border: 2px solid #44445a;
+    padding: 10px;
+  }
+
+  .filter-group { display: flex; flex-direction: column; gap: 6px; }
+
+  .filter-label {
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: #8bac0f;
+  }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; max-width: 320px; }
+
+  .chip {
+    flex: none;
+    background: #2d2d44;
+    color: #c9d6a3;
+    border: 2px solid #44445a;
+    padding: 5px 9px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+
+  .chip:hover { border-color: #8bac0f; }
+  .chip.active { border-color: #facc15; background: #33331f; color: #facc15; }
+
+  .unit-db-filters select {
+    font-family: inherit;
+    background: #2d2d44;
+    color: #c9d6a3;
+    border: 2px solid #44445a;
+    padding: 5px;
+    font-size: 11px;
+  }
+
+  #filter-reset-btn { flex: none; width: auto; padding: 8px 12px; font-size: 10px; align-self: center; }
+
+  .unit-db-count { font-size: 10px; color: #666a80; }
+
+  .unit-db-table-wrap {
+    overflow-x: auto;
+    border: 2px solid #44445a;
+  }
+
+  #unit-db-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  #unit-db-table th, #unit-db-table td {
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid #333850;
+  }
+
+  #unit-db-table th {
+    position: sticky;
+    top: 0;
+    background: #26263a;
+    color: #8bac0f;
+    letter-spacing: 1px;
+    font-size: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  #unit-db-table th:hover { color: #9bbc0f; }
+  #unit-db-table td.unit-db-effect-cell { white-space: normal; min-width: 260px; color: #8bac0f; }
+  #unit-db-table tbody tr:hover { background: #23233a; }
+
+  .unit-db-thumb {
+    width: 32px;
+    height: 32px;
+    object-fit: cover;
+    border: 1px solid #44445a;
+    background: #1a1a2e;
+    display: block;
+  }
+
+  .unit-db-boss-badge {
+    color: #ef4444;
+    font-size: 9px;
+    letter-spacing: 1px;
+    margin-left: 6px;
+  }
 </style>
 </head>
 <body>
+
+<button id="unit-db-btn" class="unit-db-fab">UNIT DATABASE</button>
 
 <div id="title-screen">
   <h1 class="title">INTO THE YUGIBREACH</h1>
@@ -724,6 +873,44 @@
   </div>
 </div>
 
+<div id="unit-db-overlay" class="hidden">
+  <div class="unit-db-panel">
+    <div class="unit-db-header">
+      <h1 class="title">UNIT DATABASE</h1>
+      <button id="unit-db-close-btn">CLOSE</button>
+    </div>
+
+    <div class="unit-db-filters">
+      <div class="filter-group">
+        <div class="filter-label">TEAM</div>
+        <div class="chip-row" id="filter-side-row"></div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">ATTRIBUTE</div>
+        <div class="chip-row" id="filter-attribute-row"></div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">TYPE</div>
+        <select id="filter-type-select"></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">COST</div>
+        <div class="chip-row" id="filter-cost-row"></div>
+      </div>
+      <button id="filter-reset-btn">RESET FILTERS</button>
+    </div>
+
+    <div id="unit-db-count" class="unit-db-count"></div>
+
+    <div class="unit-db-table-wrap">
+      <table id="unit-db-table">
+        <thead><tr id="unit-db-head-row"></tr></thead>
+        <tbody id="unit-db-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script src="units-db.js"></script>
 <script>
 (function () {
@@ -868,6 +1055,17 @@
   const recruitScreenEl = document.getElementById('recruit-screen');
   const squadScreenEl = document.getElementById('squad-screen');
   const gameContainerEl = document.querySelector('.game-container');
+  const unitDbBtn = document.getElementById('unit-db-btn');
+  const unitDbOverlayEl = document.getElementById('unit-db-overlay');
+  const unitDbCloseBtn = document.getElementById('unit-db-close-btn');
+  const filterSideRowEl = document.getElementById('filter-side-row');
+  const filterAttributeRowEl = document.getElementById('filter-attribute-row');
+  const filterTypeSelectEl = document.getElementById('filter-type-select');
+  const filterCostRowEl = document.getElementById('filter-cost-row');
+  const filterResetBtn = document.getElementById('filter-reset-btn');
+  const unitDbCountEl = document.getElementById('unit-db-count');
+  const unitDbHeadRowEl = document.getElementById('unit-db-head-row');
+  const unitDbBodyEl = document.getElementById('unit-db-body');
   const startGameBtn = document.getElementById('start-game-btn');
   const missionIndicatorEl = document.getElementById('mission-indicator');
   const deployBtn = document.getElementById('deploy-btn');
@@ -1580,12 +1778,12 @@
       const unitHits = units.filter(u => u.alive && u.team !== attacker.team &&
         (u.x === attacker.x || u.y === attacker.y) &&
         manhattan(attacker.x, attacker.y, u.x, u.y) <= attacker.range);
-      // Only an enemy-team Dark Magician's row/column splash can ever reach this
-      // point with a building nearby — buildings are enemy-only targets, so no
-      // player-facing call site ever routes a building into getAttackTargets.
-      const buildingHits = buildings.filter(b => b.hp > 0 &&
+      // Buildings always belong to the player's side, so only an enemy-team
+      // Dark Magician's row/column splash can ever hit one — a player-team Dark
+      // Magician's splash must never reach its own side's buildings.
+      const buildingHits = attacker.team === 'enemy' ? buildings.filter(b => b.hp > 0 &&
         (b.x === attacker.x || b.y === attacker.y) &&
-        manhattan(attacker.x, attacker.y, b.x, b.y) <= attacker.range);
+        manhattan(attacker.x, attacker.y, b.x, b.y) <= attacker.range) : [];
       return unitHits.concat(buildingHits);
     }
     return [primaryDefender];
@@ -3821,6 +4019,166 @@
   }
 
   beginBattleBtn.addEventListener('click', beginBattle);
+
+  // ---------- Unit database (reference view over UNIT_DATABASE) ----------
+  // A read-only spreadsheet-style browser for units-db.js, opened via the
+  // always-visible fixed-position button (unit-db-fab) so it's reachable from
+  // any screen, including mid-battle. Purely presentational — never touches
+  // game state, so opening/closing it can't affect a run in progress.
+
+  const ATTRIBUTE_ORDER = ['LIGHT', 'DARK', 'EARTH', 'WIND', 'FIRE', 'WATER'];
+
+  const dbAllUnits = Object.keys(UNIT_DATABASE).map(id => Object.assign({ id }, UNIT_DATABASE[id]));
+
+  const DB_COLUMNS = [
+    { key: 'sprite', label: '', sortable: false },
+    { key: 'name', label: 'NAME', sortable: true },
+    { key: 'cost', label: 'COST', sortable: true, numeric: true },
+    { key: 'hp', label: 'HP', sortable: true, numeric: true },
+    { key: 'atk', label: 'ATK', sortable: true, numeric: true },
+    { key: 'move', label: 'MOVE', sortable: true, numeric: true },
+    { key: 'range', label: 'RANGE', sortable: true, numeric: true },
+    { key: 'type', label: 'TYPE', sortable: true },
+    { key: 'attribute', label: 'ATTR', sortable: true },
+    { key: 'side', label: 'TEAM', sortable: true },
+    { key: 'effect', label: 'EFFECT', sortable: false },
+  ];
+
+  let dbFilterSide = 'any';
+  const dbFilterAttributes = new Set();
+  const dbFilterCosts = new Set();
+  let dbFilterType = '';
+  let dbSortKey = 'name';
+  let dbSortDir = 1;
+
+  function renderUnitDbFilterControls() {
+    const sides = ['any', 'hero', 'rival'];
+    filterSideRowEl.innerHTML = sides.map(s =>
+      '<button class="chip' + (dbFilterSide === s ? ' active' : '') + '" data-side="' + s + '">' +
+      (s === 'any' ? 'ALL' : s.toUpperCase()) + '</button>'
+    ).join('');
+
+    const attributesPresent = Array.from(new Set(dbAllUnits.map(u => u.attribute)));
+    const orderedAttributes = ATTRIBUTE_ORDER.filter(a => attributesPresent.includes(a))
+      .concat(attributesPresent.filter(a => !ATTRIBUTE_ORDER.includes(a)).sort());
+    filterAttributeRowEl.innerHTML = orderedAttributes.map(a =>
+      '<button class="chip' + (dbFilterAttributes.has(a) ? ' active' : '') + '" data-attribute="' + a + '">' + a + '</button>'
+    ).join('');
+
+    const typesPresent = Array.from(new Set(dbAllUnits.map(u => u.type))).sort();
+    filterTypeSelectEl.innerHTML = '<option value="">ALL TYPES</option>' +
+      typesPresent.map(t => '<option value="' + t + '"' + (dbFilterType === t ? ' selected' : '') + '>' + t + '</option>').join('');
+
+    const costsPresent = Array.from(new Set(dbAllUnits.map(u => u.cost))).sort((a, b) => a - b);
+    filterCostRowEl.innerHTML = costsPresent.map(c =>
+      '<button class="chip' + (dbFilterCosts.has(c) ? ' active' : '') + '" data-cost="' + c + '">' + c + '</button>'
+    ).join('');
+  }
+
+  function filteredSortedUnits() {
+    const rows = dbAllUnits.filter(u =>
+      (dbFilterSide === 'any' || u.side === dbFilterSide) &&
+      (dbFilterAttributes.size === 0 || dbFilterAttributes.has(u.attribute)) &&
+      (dbFilterCosts.size === 0 || dbFilterCosts.has(u.cost)) &&
+      (!dbFilterType || u.type === dbFilterType)
+    );
+    rows.sort((a, b) => {
+      const av = a[dbSortKey], bv = b[dbSortKey];
+      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv));
+      return cmp * dbSortDir;
+    });
+    return rows;
+  }
+
+  function renderUnitDbTable() {
+    unitDbHeadRowEl.innerHTML = DB_COLUMNS.map(col => {
+      let arrow = '';
+      if (col.sortable && dbSortKey === col.key) arrow = dbSortDir === 1 ? ' ▲' : ' ▼';
+      return '<th data-key="' + col.key + '">' + col.label + arrow + '</th>';
+    }).join('');
+
+    const rows = filteredSortedUnits();
+    unitDbBodyEl.innerHTML = rows.map(u => (
+      '<tr>' +
+        '<td><img class="unit-db-thumb" src="' + spritePath(u.id) + '" alt=""></td>' +
+        '<td>' + u.name + (u.isBoss ? '<span class="unit-db-boss-badge">BOSS</span>' : '') + '</td>' +
+        '<td>' + u.cost + '</td>' +
+        '<td>' + u.hp + '</td>' +
+        '<td>' + u.atk + '</td>' +
+        '<td>' + u.move + '</td>' +
+        '<td>' + u.range + '</td>' +
+        '<td>' + u.type + '</td>' +
+        '<td>' + u.attribute + '</td>' +
+        '<td>' + u.side.toUpperCase() + '</td>' +
+        '<td class="unit-db-effect-cell">' + u.effect + '</td>' +
+      '</tr>'
+    )).join('');
+
+    unitDbCountEl.textContent = rows.length + ' / ' + dbAllUnits.length + ' units shown';
+  }
+
+  function renderUnitDb() {
+    renderUnitDbFilterControls();
+    renderUnitDbTable();
+  }
+
+  function openUnitDb() {
+    renderUnitDb();
+    unitDbOverlayEl.classList.remove('hidden');
+  }
+
+  function closeUnitDb() {
+    unitDbOverlayEl.classList.add('hidden');
+  }
+
+  unitDbBtn.addEventListener('click', openUnitDb);
+  unitDbCloseBtn.addEventListener('click', closeUnitDb);
+
+  filterSideRowEl.addEventListener('click', (e) => {
+    const side = e.target.dataset.side;
+    if (!side) return;
+    dbFilterSide = side;
+    renderUnitDb();
+  });
+
+  filterAttributeRowEl.addEventListener('click', (e) => {
+    const attribute = e.target.dataset.attribute;
+    if (!attribute) return;
+    if (dbFilterAttributes.has(attribute)) dbFilterAttributes.delete(attribute);
+    else dbFilterAttributes.add(attribute);
+    renderUnitDb();
+  });
+
+  filterCostRowEl.addEventListener('click', (e) => {
+    const cost = e.target.dataset.cost;
+    if (!cost) return;
+    const n = Number(cost);
+    if (dbFilterCosts.has(n)) dbFilterCosts.delete(n);
+    else dbFilterCosts.add(n);
+    renderUnitDb();
+  });
+
+  filterTypeSelectEl.addEventListener('change', () => {
+    dbFilterType = filterTypeSelectEl.value;
+    renderUnitDbTable();
+  });
+
+  filterResetBtn.addEventListener('click', () => {
+    dbFilterSide = 'any';
+    dbFilterAttributes.clear();
+    dbFilterCosts.clear();
+    dbFilterType = '';
+    renderUnitDb();
+  });
+
+  unitDbHeadRowEl.addEventListener('click', (e) => {
+    const key = e.target.dataset.key;
+    const col = DB_COLUMNS.find(c => c.key === key);
+    if (!col || !col.sortable) return;
+    if (dbSortKey === key) dbSortDir *= -1;
+    else { dbSortKey = key; dbSortDir = 1; }
+    renderUnitDbTable();
+  });
 
   // Resume the last checkpointed run at Home Base if a save exists; otherwise a
   // fresh page load is a fresh run starting at the title screen.

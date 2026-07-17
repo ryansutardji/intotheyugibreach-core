@@ -1,6 +1,6 @@
 ## To-do items to improve gameplay
 
-- [ ] **Create unit database**: The units-db.js is hard to read so we need to build a view that
+- [x] **Create unit database**: The units-db.js is hard to read so we need to build a view that
       can be accessed in-game with all the units, stats and effects so we can easily see what 
       units have what. There should be filters for attributes, types, cost and team (hero vs rival)
 - [ ] **Turn on knockback**: the knockback system is fully wired end-to-end already —
