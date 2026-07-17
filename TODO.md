@@ -25,12 +25,6 @@
       flavor (e.g. a tile that stalls a unit for a turn, or applies damage-over-time instead
       of instant death) would make knockback pushes a real decision (kill vs. tempo) instead
       of a single binary outcome.
-- [x] **Give boss nodes distinct AI behavior**: the enemy AI is currently one greedy
-      heuristic for every unit (nearest-target Manhattan distance, `index.html:1595-1616`) —
-      no role-based prioritization, no bespoke patterns. Ties directly into the **Boss
-      nodes** item above: a boss with a scripted, still-telegraphed-but-distinct behavior
-      (e.g. always targets lowest current HP, always retreats after attacking) would read
-      as a real set-piece rather than just a bigger stat total.
 - [ ] **Give Attribute (LIGHT/DARK/EARTH/WIND/FIRE/WATER) a mechanical hook**: Attribute is
       pure flavor today (only referenced in UI display code) while Type has exactly four
       hardcoded, unit-ID-specific interactions (Kaiser Sea Horse/Troop Dragon's Dragon
