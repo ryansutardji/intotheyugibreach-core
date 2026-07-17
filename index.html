@@ -717,8 +717,8 @@
       <div class="legend-note">Outline = team (blue outline = you, red outline = enemy).</div>
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
       <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
-      <div class="legend-note">Mission objectives: yellow tile glow = a tile you must defend. Blue ring = your VIP unit — protect it. Yellow ring = the enemy's priority target — destroying it wins instantly.</div>
-      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Some heavy melee units can shove an adjacent enemy back a tile on hit; a purple arrow in the telegraph shows where that shove will land.</div>
+      <div class="legend-note">Mission objectives: yellow ring = the enemy's priority target — destroying it wins instantly.</div>
+      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Some heavy melee units can shove an adjacent enemy back a tile on hit; a purple arrow in the telegraph shows where that shove will land. Solid orange tiles are your buildings — impassable, with their own HP bar when damaged. Lose every building and the mission ends in defeat, no matter what the stated objective is or how the rest of your squad is doing.</div>
     </div>
   </div>
   </div>
@@ -932,16 +932,11 @@
   let nodeObjectives = {};
 
   const OBJECTIVE_TYPES = [
-    'kill_all', 'protect_vip', 'defend_tile', 'survive_rounds', 'eliminate_target', 'timed_clear',
+    'kill_all', 'survive_rounds', 'eliminate_target', 'timed_clear',
   ];
 
   function buildObjective(type, node) {
     switch (type) {
-      case 'defend_tile':
-        // Planted on the player's side of the board so every enemy has to cross the
-        // whole map to reach it, giving the telegraph system room to warn about it
-        // several turns out.
-        return { type, x: Math.random() < 0.5 ? 0 : 1, y: Math.floor(Math.random() * GRID) };
       case 'survive_rounds':
         return { type, rounds: Math.max(4, Math.round(node.budget * 0.6)) };
       case 'timed_clear':
@@ -1067,18 +1062,8 @@
       for (let y = 0; y < GRID; y++) pool.push({ x, y });
     });
 
-    // If this node's objective is defend_tile, its guarded tile also lives inside
-    // PLAYER_ZONE_X (see buildObjective) — exclude it so a building can never spawn
-    // on top of it and make the enemy physically unable to reach (and thus breach)
-    // the guarded tile.
-    const objective = nodeObjectives[node.id];
-    const excluded = objective && objective.type === 'defend_tile'
-      ? objective.x + ',' + objective.y
-      : null;
-    const candidates = pool.filter(t => (t.x + ',' + t.y) !== excluded);
-
-    const count = Math.min(buildingCountForNode(node), candidates.length);
-    const shuffled = candidates.slice().sort(() => Math.random() - 0.5);
+    const count = Math.min(buildingCountForNode(node), pool.length);
+    const shuffled = pool.slice().sort(() => Math.random() - 0.5);
     return shuffled.slice(0, count).map(t => ({
       x: t.x, y: t.y, type: 'building', impassable: true, hp: 12, maxHp: 12,
     }));
@@ -1094,8 +1079,6 @@
 
   function objectiveLabel(obj) {
     switch (obj.type) {
-      case 'protect_vip': return 'PROTECT';
-      case 'defend_tile': return 'DEFEND';
       case 'survive_rounds': return 'SURVIVE ' + obj.rounds;
       case 'eliminate_target': return 'ELIMINATE';
       case 'timed_clear': return 'CLEAR IN ' + obj.rounds;
@@ -1105,10 +1088,6 @@
 
   function objectiveDescription(obj) {
     switch (obj.type) {
-      case 'protect_vip':
-        return 'PROTECT: one unit in your squad, chosen at random when the battle begins, must survive — losing it ends the mission in defeat no matter what else survives.';
-      case 'defend_tile':
-        return 'DEFEND: tile (' + obj.x + ', ' + obj.y + ') must never be reached by an enemy. The instant one lands there, the mission ends in defeat.';
       case 'survive_rounds':
         return 'SURVIVE: hold out for ' + obj.rounds + ' rounds. You win the moment you reach it, even with enemies still standing.';
       case 'eliminate_target':
@@ -1122,8 +1101,6 @@
 
   function objectiveVictoryText(obj) {
     switch (obj.type) {
-      case 'protect_vip': return 'The VIP made it out alive.';
-      case 'defend_tile': return 'The line held.';
       case 'survive_rounds': return 'You outlasted them.';
       case 'eliminate_target': return 'The priority target is down.';
       case 'timed_clear': return 'Cleared with time to spare.';
@@ -1133,8 +1110,6 @@
 
   function objectiveDefeatText(obj) {
     switch (obj.type) {
-      case 'protect_vip': return 'The VIP has fallen';
-      case 'defend_tile': return 'The line broke';
       case 'timed_clear': return 'Time ran out';
       default: return 'Your squad has fallen';
     }
@@ -1564,37 +1539,24 @@
     const playerAlive = units.some(u => u.team === 'player' && u.alive);
     if (!playerAlive) { endGame(false); return true; }
 
-    // Objective-specific win/loss checks layer on top of the two universal ones
-    // below — killing every enemy is always a valid win regardless of objective
-    // type, and losing your whole squad is always a loss.
+    // Universal background condition, layered under every objective type: losing
+    // every building is as fatal as losing your whole squad, regardless of what
+    // the node's specific objective is or how the rest of the fight is going.
+    const hadBuildings = buildings.length > 0;
+    const buildingsAlive = buildings.some(b => b.hp > 0);
+    if (hadBuildings && !buildingsAlive) { endGame(false); return true; }
+
+    // Objective-specific win/loss checks layer on top of the universal ones above
+    // and below — killing every enemy is always a valid win regardless of
+    // objective type, and losing your whole squad/buildings is always a loss.
     const obj = currentObjective();
-    if (obj) {
-      if (obj.type === 'protect_vip') {
-        const vip = units.find(u => u.isVIP);
-        if (vip && !vip.alive) { endGame(false); return true; }
-      }
-      if (obj.type === 'eliminate_target') {
-        const target = units.find(u => u.isPriorityTarget);
-        if (target && !target.alive) { endGame(true); return true; }
-      }
+    if (obj && obj.type === 'eliminate_target') {
+      const target = units.find(u => u.isPriorityTarget);
+      if (target && !target.alive) { endGame(true); return true; }
     }
 
     const enemyAlive = units.some(u => u.team === 'enemy' && u.alive);
     if (!enemyAlive) { endGame(true); return true; }
-    return false;
-  }
-
-  // Defend-the-tile is tile-locked, not checked in checkGameOver: an enemy landing
-  // on the guarded tile ends the battle the instant its move resolves, during
-  // startEnemyTurn's execution loop, rather than via a unit-alive predicate.
-  function checkTileBreach(unit) {
-    const obj = currentObjective();
-    if (!obj || obj.type !== 'defend_tile' || gameOver) return false;
-    if (unit.x === obj.x && unit.y === obj.y) {
-      log(labelOf(unit) + ' reaches the guarded tile!');
-      endGame(false);
-      return true;
-    }
     return false;
   }
 
@@ -1619,7 +1581,13 @@
       currentNodeWon = true;
     } else {
       bannerTextEl.textContent = 'DEFEAT';
-      bannerSubEl.textContent = objectiveDefeatText(obj) + ' at ' + currentNode.name + '.';
+      // Buildings-collapse is a universal defeat cause layered under every
+      // objective, so it takes priority over the objective-specific defeat text
+      // (which otherwise defaults to a squad-wipe message that wouldn't be true
+      // here — the squad can be fully alive when the buildings fall).
+      const buildingsFell = buildings.length > 0 && !buildings.some(b => b.hp > 0);
+      const defeatText = buildingsFell ? 'Your buildings have fallen' : objectiveDefeatText(obj);
+      bannerSubEl.textContent = defeatText + ' at ' + currentNode.name + '.';
     }
 
     awardUnitXp();
@@ -1797,26 +1765,16 @@
     const enemyUnits = units.filter(u => u.team === 'enemy' && u.alive);
     const plan = [];
 
-    // defend_tile has no unit to chase, so without this the AI would only ever
-    // wander near the guarded tile by coincidence (e.g. while pathing toward a
-    // player unit that happens to be nearby). Appending it as an extra target lets
-    // chooseAIMove's existing nearest-target logic pull enemies toward it too,
-    // competing with player units exactly like a real threat would.
-    const obj = currentObjective();
-    const tileLure = (obj && obj.type === 'defend_tile') ? [{ x: obj.x, y: obj.y }] : [];
-
     for (const unit of enemyUnits) {
       const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
       // focusLowestHP (currently only boss units) locks onto a single target — the
       // lowest-HP living player unit — instead of gravitating toward whichever
       // target is nearest, so it reads as deliberate focus fire rather than the
-      // default nearest-target heuristic every other unit uses. Overrides the
-      // defend_tile lure too, since a boss single-mindedly hunting the weakest
-      // target is the point of the flag.
+      // default nearest-target heuristic every other unit uses.
       const focusLowestHP = !!UNIT_DATABASE[unit.unitId].focusLowestHP;
       const targets = focusLowestHP
         ? alivePlayers.slice().sort((a, b) => a.hp - b.hp).slice(0, 1)
-        : alivePlayers.concat(tileLure);
+        : alivePlayers;
       if (targets.length === 0) break;
 
       // neverRetreat (currently only boss units) ignores the low-HP retreat
@@ -1931,8 +1889,6 @@
         log(labelOf(unit) + "'s path is blocked!");
       }
       render();
-
-      if (checkTileBreach(unit)) { aiRunning = false; return; }
 
       await delay(350);
 
@@ -2179,7 +2135,7 @@
       [6, 7].forEach(x => ctx.fillRect(x * TILE, 0, TILE, canvas.height));
     }
 
-    if (phase === 'battle' || phase === 'placement') { drawObjectiveTileMarker(); drawHazardTileMarkers(); drawBuildingTileMarkers(); }
+    if (phase === 'battle' || phase === 'placement') { drawHazardTileMarkers(); drawBuildingTileMarkers(); }
 
     if (selectedUnit && !gameOver) {
       ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
@@ -2232,22 +2188,7 @@
     drawObjectiveUnitMarkers();
   }
 
-  // Guarded-tile glow for the defend_tile objective — drawn early, same layer as the
-  // reachable-tile/telegraph overlays, so units standing on it stay fully visible.
-  function drawObjectiveTileMarker() {
-    const obj = currentObjective();
-    if (!obj || obj.type !== 'defend_tile') return;
-    ctx.save();
-    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
-    ctx.fillRect(obj.x * TILE, obj.y * TILE, TILE, TILE);
-    ctx.strokeStyle = '#facc15';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(obj.x * TILE + 4, obj.y * TILE + 4, TILE - 8, TILE - 8);
-    ctx.restore();
-  }
-
-  // Pit hazard tiles — drawn early, same layer as the objective-tile marker, so
+  // Pit hazard tiles — drawn early, same layer as the building tile markers, so
   // units standing next to (or knocked onto) one stay fully visible.
   function drawHazardTileMarkers() {
     currentHazards().forEach(h => {
@@ -2287,14 +2228,14 @@
     });
   }
 
-  // VIP / priority-target rings, drawn last so they sit on top of unit sprites and
-  // HP bars rather than being covered by them.
+  // Priority-target ring, drawn last so it sits on top of unit sprites and HP
+  // bars rather than being covered by them.
   function drawObjectiveUnitMarkers() {
-    units.filter(u => u.alive && (u.isVIP || u.isPriorityTarget)).forEach(u => {
+    units.filter(u => u.alive && u.isPriorityTarget).forEach(u => {
       const cx = u.x * TILE + TILE / 2;
       const cy = u.y * TILE + TILE / 2;
       ctx.save();
-      ctx.strokeStyle = u.isVIP ? '#38bdf8' : '#facc15';
+      ctx.strokeStyle = '#facc15';
       ctx.lineWidth = 3;
       ctx.setLineDash([3, 2]);
       ctx.beginPath();
@@ -2317,33 +2258,33 @@
     const obj = currentObjective();
     if (!obj) { objectiveStatusEl.textContent = ''; return; }
 
+    let objectiveText;
     switch (obj.type) {
-      case 'protect_vip': {
-        const vip = units.find(u => u.isVIP);
-        objectiveStatusEl.textContent = vip
-          ? 'PROTECT: ' + vip.name + ' — ' + Math.max(0, vip.hp) + '/' + vip.maxHp + ' HP'
-          : 'PROTECT';
-        break;
-      }
-      case 'defend_tile':
-        objectiveStatusEl.textContent = 'DEFEND: tile (' + obj.x + ', ' + obj.y + ')';
-        break;
       case 'survive_rounds':
-        objectiveStatusEl.textContent = 'SURVIVE: round ' + Math.min(round, obj.rounds) + ' / ' + obj.rounds;
+        objectiveText = 'SURVIVE: round ' + Math.min(round, obj.rounds) + ' / ' + obj.rounds;
         break;
       case 'eliminate_target': {
         const target = units.find(u => u.isPriorityTarget);
-        objectiveStatusEl.textContent = (target && target.alive)
+        objectiveText = (target && target.alive)
           ? 'ELIMINATE: ' + target.name + ' — ' + Math.max(0, target.hp) + '/' + target.maxHp + ' HP'
           : 'ELIMINATE: priority target down';
         break;
       }
       case 'timed_clear':
-        objectiveStatusEl.textContent = 'CLEAR: round ' + round + ' / ' + obj.rounds;
+        objectiveText = 'CLEAR: round ' + round + ' / ' + obj.rounds;
         break;
       default:
-        objectiveStatusEl.textContent = 'ELIMINATE ALL ENEMIES';
+        objectiveText = 'ELIMINATE ALL ENEMIES';
     }
+
+    // Buildings-remaining is a universal background readout, shown alongside every
+    // objective type rather than as an objective case of its own — see
+    // checkGameOver's buildings-collapse check, which this mirrors.
+    const buildingsAlive = buildings.filter(b => b.hp > 0).length;
+    const buildingsText = buildings.length > 0
+      ? 'BUILDINGS: ' + buildingsAlive + '/' + buildings.length + ' standing'
+      : '';
+    objectiveStatusEl.textContent = buildingsText ? buildingsText + '  ·  ' + objectiveText : objectiveText;
   }
 
   function statsHtml(u) {
@@ -2364,7 +2305,6 @@
       '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
       '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>' +
       '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>' +
-      (u.isVIP ? '<div class="unit-effect" style="color:#38bdf8;">VIP — protect this unit at all costs. Losing it ends the mission in defeat.</div>' : '') +
       (u.isPriorityTarget ? '<div class="unit-effect" style="color:#facc15;">PRIORITY TARGET — destroying this unit wins the mission instantly.</div>' : '')
     );
   }
@@ -2863,7 +2803,11 @@
       recruitPoolFrozen = data.recruitPoolFrozen;
       clearedNodes = new Set(data.clearedNodes || []);
       // Older saves predate objectives entirely — roll fresh rather than leaving
-      // every node without one.
+      // every node without one. A save from before defend_tile/protect_vip were
+      // retired may still carry one of those types on some node; that's left as
+      // is rather than migrated — every objective-text/check switch statement's
+      // default case already treats an unrecognized type like kill_all, so it
+      // degrades gracefully instead of erroring.
       if (data.nodeObjectives && Object.keys(data.nodeObjectives).length) {
         nodeObjectives = data.nodeObjectives;
       } else {
@@ -3380,15 +3324,7 @@
     turnIndicatorEl.className = 'player';
     roundCounterEl.textContent = 'ROUND ' + round;
 
-    // protect_vip flags one already-placed player unit at random — decided here,
-    // right as the battle actually starts, rather than at objective-roll time.
     const obj = currentObjective();
-    if (obj && obj.type === 'protect_vip') {
-      const playerUnits = units.filter(u => u.team === 'player' && u.alive);
-      if (playerUnits.length) {
-        playerUnits[Math.floor(Math.random() * playerUnits.length)].isVIP = true;
-      }
-    }
 
     battleLogEl.innerHTML = '';
     log('Battle begins! ' + objectiveDescription(obj || { type: 'kill_all' }));

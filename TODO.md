@@ -67,7 +67,7 @@ is a real dependency for the next rather than just a suggested sequence.
 - [x] **Render buildings and add a building-status HUD element**: buildings need a board
       sprite distinct from unit sprites, plus something like the round-counter/
       turn-indicator pair to show remaining building count/HP at a glance.
-- [ ] **Refactor win/lose conditions around building collapse**: layer "all your buildings
+- [x] **Refactor win/lose conditions around building collapse**: layer "all your buildings
       destroyed = defeat" as a universal condition under the 4 remaining objective types
       (kill all enemies / survive N rounds / eliminate the priority target / clear within
       N rounds — each becomes "...before your buildings collapse"). Retires
