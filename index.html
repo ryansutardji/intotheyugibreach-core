@@ -1201,7 +1201,11 @@
       buildings.filter(b => b.impassable && b.hp > 0).map(b => b.x + ',' + b.y)
     );
     const canPassThrough = unit.unitId === 'curse_of_dragon';
-    const start = { x: unit.x, y: unit.y };
+    // path is the tile-by-tile route from the unit's start (exclusive) to this tile
+    // (inclusive) — kept alongside each reachable tile so planEnemyTurn can replay
+    // the actual route at execution time instead of just teleporting to the final
+    // destination, letting a newly-placed blocker stop the unit mid-route.
+    const start = { x: unit.x, y: unit.y, path: [] };
     const visited = new Map([[start.x + ',' + start.y, 0]]);
     const queue = [start];
     const result = [start];
@@ -1220,8 +1224,9 @@
         const isBlocked = occupied.has(key) || impassableHazards.has(key) || impassableBuildings.has(key);
         if (isBlocked && !canPassThrough) continue;
         visited.set(key, dist + 1);
-        queue.push(n);
-        if (!isBlocked) result.push(n);
+        const node = { x: n.x, y: n.y, path: cur.path.concat([{ x: n.x, y: n.y }]) };
+        queue.push(node);
+        if (!isBlocked) result.push(node);
       }
     }
     return result;
@@ -2212,7 +2217,7 @@
       }
 
       plan.push({
-        unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y,
+        unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y, path: dest.path || [],
         primaryStrikeTiles, previewStrikeTiles, knockbackTiles, isRetreat,
       });
     }
@@ -2257,25 +2262,62 @@
 
       await delay(400);
 
-      const occupied = occupiedSet(unit);
-      const movedTarget = entry.destX !== unit.x || entry.destY !== unit.y;
-      const destBlocked = movedTarget && occupied.has(entry.destX + ',' + entry.destY);
-      const dest = destBlocked ? { x: unit.x, y: unit.y } : { x: entry.destX, y: entry.destY };
+      // Curse of Dragon flies over every intermediate obstacle by ability, so only
+      // its landing tile is re-checked, same as before. Every other unit replays its
+      // planned route tile by tile against the board as it stands right now (other
+      // enemies may have already moved this turn, or the player placed a blocker
+      // since planning), stopping at the last free tile before whatever's in the way.
+      const canPassThrough = unit.unitId === 'curse_of_dragon';
+      let dest, blockedBy = null;
+      if (canPassThrough) {
+        const occupied = occupiedSet(unit);
+        const movedTarget = entry.destX !== unit.x || entry.destY !== unit.y;
+        const landingBlocked = movedTarget && occupied.has(entry.destX + ',' + entry.destY);
+        dest = landingBlocked ? { x: unit.x, y: unit.y } : { x: entry.destX, y: entry.destY };
+        if (landingBlocked) blockedBy = unitAt(entry.destX, entry.destY);
+      } else {
+        let stepX = unit.x, stepY = unit.y;
+        for (const step of entry.path) {
+          if (occupiedSet(unit).has(step.x + ',' + step.y)) {
+            blockedBy = unitAt(step.x, step.y);
+            break;
+          }
+          stepX = step.x; stepY = step.y;
+        }
+        dest = { x: stepX, y: stepY };
+      }
 
-      if (dest.x !== unit.x || dest.y !== unit.y) {
+      const didMove = dest.x !== unit.x || dest.y !== unit.y;
+      if (didMove) {
         unit.x = dest.x;
         unit.y = dest.y;
         unit.movedThisTurn = true;
         log(labelOf(unit) + (entry.isRetreat ? ' retreats.' : ' advances.'));
-      } else if (destBlocked) {
-        log(labelOf(unit) + "'s path is blocked!");
+      }
+      if (blockedBy) {
+        log(labelOf(unit) + "'s path is blocked by " + labelOf(blockedBy) + '!');
       }
       render();
 
       await delay(350);
 
       if (!entry.isRetreat) {
+        let attacksLeft = attacksPerTurn(unit);
+
+        // Stopped short by a player unit standing in the way — strike back at it
+        // immediately rather than whiffing at the (now unreachable) planned tiles.
+        if (blockedBy && blockedBy.team === 'player' && blockedBy.alive &&
+            manhattan(unit.x, unit.y, blockedBy.x, blockedBy.y) <= unit.range) {
+          resolveAttack(unit, blockedBy);
+          unit.attacksUsed += 1;
+          attacksLeft -= 1;
+          render();
+          if (checkGameOver()) { aiRunning = false; return; }
+          await delay(400);
+        }
+
         for (const strikeTile of entry.primaryStrikeTiles) {
+          if (attacksLeft <= 0) break;
           if (!unit.alive || gameOver) break;
           if (manhattan(unit.x, unit.y, strikeTile.x, strikeTile.y) > unit.range) {
             log(labelOf(unit) + "'s attack falls short.");
@@ -2292,6 +2334,7 @@
           }
           resolveAttack(unit, target);
           unit.attacksUsed += 1;
+          attacksLeft -= 1;
           render();
           if (checkGameOver()) { aiRunning = false; return; }
           await delay(400);
