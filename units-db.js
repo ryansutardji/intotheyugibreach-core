@@ -141,7 +141,7 @@ const UNIT_DATABASE = {
   },
   d_d_warrior: {
     name: 'D.D. Warrior',
-    cost: 5,
+    cost: 4,
     hp: 56,
     atk: 14,
     move: 3,
