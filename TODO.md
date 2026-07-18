@@ -1,22 +1,25 @@
 ## To-do items to improve gameplay
 
-- [x] **Create unit database**: The units-db.js is hard to read so we need to build a view that
-      can be accessed in-game with all the units, stats and effects so we can easily see what 
-      units have what. There should be filters for attributes, types, cost and team (hero vs rival)
-- [ ] **Turn on knockback**: the knockback system is fully wired end-to-end already —
-      `hasKnockback()`, push-destination math, pit-shove-kills-on-landing resolution, AI
-      turn planning, and its own purple telegraph arrow all exist (`index.html` ~1225-1400,
-      1680-1708, 1927-1943) — but zero units in `units-db.js` actually set `knockback: true`,
-      despite the in-game legend already describing the mechanic as live (`index.html:714`).
-      Highest payoff-to-effort item on the list: just flag a few heavy melee units (Vorse
-      Raider, Curse of Dragon, Jinzo, Gaia the Fierce Knight are thematic fits) to unlock
-      Into the Breach-style "shove into the pit" plays with no engine changes needed.
-- [ ] **Fix Jinzo's untelegraphed turn-start burn**: every other enemy action (move, attack,
-      knockback) is shown to the player via the perfect-information turn-plan preview before
-      it happens — except Jinzo's 5-dmg-to-adjacent-enemies aura, which runs in
-      `applyTurnStartEffects` (`index.html:1825-1858`) after the plan is already frozen and
-      shown, so it lands as a genuine surprise. Should be folded into the same telegraph pass
-      as everything else for consistency.
+- [ ] **Fix enemy plan desync after a mid-turn knockback**: the enemy turn is
+      planned once at the start of the player's turn (`planEnemyTurn`,
+      `index.html` ~2312) and captured as fixed absolute tiles — `path`,
+      `destX`/`destY`, `primaryStrikeTiles` — then replayed verbatim in
+      `startEnemyTurn` (~2515-2569). The replay loop already tolerates the
+      *board* changing since planning (a blocker moving in, the attacker
+      dying) but not the *planned unit itself* moving: since every attack now
+      knocks its target back, a player attack during their own turn can shove
+      an enemy off the tile its plan was built from, so by the time that
+      enemy's turn comes up `unit.x/y` no longer matches `entry.fromX/fromY`.
+      The replay still walks `entry.path`'s stale absolute waypoints from the
+      unit's new (shoved) position without checking they're even adjacent to
+      it, so the unit can land wherever the stale path happens to end up —
+      including right back on its own current tile, which reads as "didn't
+      move at all," silently ditching the telegraphed advance. Its
+      `primaryStrikeTiles` attack targets are similarly pinned to the
+      pre-knockback plan, so the follow-up attack can also miss or hit the
+      wrong tile. Needs either a fresh re-path (at minimum) for any unit whose
+      position no longer matches its `fromX`/`fromY` when its turn comes up,
+      or invalidating/re-telegraphing that unit's whole plan entry.
 - [ ] **Add a second hazard type**: today every hazard tile is the same
       `{ type: 'pit', impassable: true, lethalOnEntry: true }` shape — binary
       instant-death-on-entry. The code already anticipates more variety (the comment at
@@ -32,9 +35,3 @@
       Insect Queen's Insect-death counter) rather than a generic synergy system. Lower
       priority and more speculative than the items above, but the most under-used axis for
       future draft-time build-crafting/replayability.
-- [ ] **Turn on knockback, including into buildings**: activates the already-wired
-      knockback system (see the **Turn on knockback** item above) and additionally
-      decides what a push into a building tile actually does — blocked like a wall, or
-      collision damage like Into the Breach's mountains — now that buildings are a real
-      obstacle on the board.
-

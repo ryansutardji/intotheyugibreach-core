@@ -867,7 +867,7 @@
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
       <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
       <div class="legend-note">Mission objectives: yellow ring = the enemy's priority target — destroying it wins instantly.</div>
-      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Some heavy melee units can shove an adjacent enemy back a tile on hit; a purple arrow in the telegraph shows where that shove will land. Solid orange tiles are your buildings — impassable, with their own HP bar when damaged. Lose every building and the mission ends in defeat, no matter what the stated objective is or how the rest of your squad is doing.</div>
+      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Every melee hit shoves the target back a tile — into a pit kills it, into a building damages the building, into another unit damages both. Solid orange tiles are your buildings — impassable, with their own HP bar when damaged. Lose every building and the mission ends in defeat, no matter what the stated objective is or how the rest of your squad is doing.</div>
     </div>
   </div>
   </div>
@@ -1555,10 +1555,6 @@
     return mult;
   }
 
-  function hasKnockback(unit) {
-    return !!UNIT_DATABASE[unit.unitId].knockback;
-  }
-
   // Returns the push-destination tile for attacker->defender knockback, or null if
   // not applicable. Only defined for range-1 (melee) attacks, where attacker and
   // defender are guaranteed to be orthogonally adjacent, so "one tile further along
@@ -1758,23 +1754,57 @@
       log(labelOf(attacker) + " saps " + labelOf(defender) + "'s ATK! (-" + atkLoss + ' ATK)');
     }
 
-    // Knockback: only for a defender that survived the hit — a destroyed defender
-    // has no tile left to be pushed to.
-    if (defender.alive && hasKnockback(attacker)) {
+    // Knockback: every attack shoves its target now, as long as the defender
+    // survived the hit — a destroyed defender has no tile left to be pushed to.
+    // Melee-only by construction (knockbackDestination returns null for
+    // non-adjacent/ranged attackers or an off-board destination).
+    if (defender.alive) {
       const dest = knockbackDestination(attacker, defender);
-      if (dest && !unitAt(dest.x, dest.y) && !buildingAt(dest.x, dest.y)) {
+      if (dest) {
         const pit = currentHazards().find(h => h.x === dest.x && h.y === dest.y && h.impassable && h.lethalOnEntry);
+        const blockingBuilding = buildingAt(dest.x, dest.y);
+        const blockingUnit = unitAt(dest.x, dest.y);
         if (pit) {
           defender.alive = false;
           log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a pit!');
           onUnitDeath(defender, attacker);
+        } else if (blockingBuilding) {
+          // Defender doesn't move — the building's tile stays impassable — only
+          // the building takes the impact.
+          const bumpDmg = 6;
+          blockingBuilding.hp = Math.max(0, blockingBuilding.hp - bumpDmg);
+          log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a building, dealing ' + bumpDmg + ' dmg!');
+          if (blockingBuilding.hp <= 0) {
+            log('The building is destroyed!');
+            onBuildingDestroyed(blockingBuilding, attacker);
+          }
+        } else if (blockingUnit) {
+          // Team-agnostic collision — friendly fire applies. Neither unit moves;
+          // both eat the impact and go through the normal death cascade, crediting
+          // the original attacker as killer either way (same pattern as Cyber
+          // Jar's blast / Man-Eater Bug's retaliation above).
+          const collideDmg = 10;
+          defender.hp = Math.max(0, defender.hp - collideDmg);
+          blockingUnit.hp = Math.max(0, blockingUnit.hp - collideDmg);
+          log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into ' + labelOf(blockingUnit) + '! Both take ' + collideDmg + ' dmg.');
+          if (defender.hp <= 0) {
+            defender.alive = false;
+            log(labelOf(defender) + ' is destroyed!');
+            onUnitDeath(defender, attacker);
+          }
+          if (blockingUnit.hp <= 0) {
+            blockingUnit.alive = false;
+            log(labelOf(blockingUnit) + ' is destroyed!');
+            onUnitDeath(blockingUnit, attacker);
+          }
         } else {
           defender.x = dest.x;
           defender.y = dest.y;
           log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' back a tile.');
         }
       }
-      // Off-board or an occupied destination: the shove simply fails, no extra effect.
+      // dest is null: attacker wasn't adjacent (ranged hit) or destination was
+      // off-board — no effect either way.
     }
 
     return dmg;
@@ -2198,8 +2228,8 @@
   // > damageUnit), or a blank strike if nothing's in range. includeBuildings=false
   // is used for the "genuinely blocked by the player" case, where the point is to
   // fight the blocker, not opportunistically snipe some other reachable building.
-  // out is { primaryStrikeTiles, previewStrikeTiles, knockbackTiles }, mutated in
-  // place. Returns false only when boxed in by allies with nothing legal to hit.
+  // out is { primaryStrikeTiles, previewStrikeTiles }, mutated in place. Returns
+  // false only when boxed in by allies with nothing legal to hit.
   function planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out) {
     const inRangeBuildings = includeBuildings ? buildings.filter(b => b.hp > 0 &&
       manhattan(unit.x, unit.y, b.x, b.y) <= unit.range) : [];
@@ -2210,14 +2240,12 @@
       )[0];
       out.primaryStrikeTiles.push({ x: primary.x, y: primary.y });
       getAttackTargets(unit, primary).forEach(t => out.previewStrikeTiles.push({ x: t.x, y: t.y }));
-      out.knockbackTiles.push(primary.type === 'building' || !hasKnockback(unit) ? null : knockbackDestination(unit, primary));
       return true;
     }
     const blank = pickBlankStrikeTile(unit);
     if (!blank) return false; // boxed in by allies on every tile in range — nothing legal to hit
     out.primaryStrikeTiles.push(blank);
     out.previewStrikeTiles.push(blank);
-    out.knockbackTiles.push(null);
     return true;
   }
 
@@ -2422,14 +2450,10 @@
       // player during the telegraph, which can be a superset of primaryStrikeTiles.
       const primaryStrikeTiles = [];
       const previewStrikeTiles = [];
-      // Parallel to primaryStrikeTiles: the shove destination for a knockback-capable
-      // unit's planned hit, or null when there's no real target (a blank strike has
-      // no defender to push) or the unit has no knockback trait.
-      const knockbackTiles = [];
 
       if (!isRetreat) {
         let attacksLeft = attacksPerTurn(unit);
-        const out = { primaryStrikeTiles, previewStrikeTiles, knockbackTiles };
+        const out = { primaryStrikeTiles, previewStrikeTiles };
 
         if (dispatchMode === 'building') {
           // Force the building line of attack for as long as it (or another
@@ -2445,7 +2469,6 @@
             if (inRangeNow) {
               primaryStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
               previewStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
-              knockbackTiles.push(null); // buildings never take knockback
               predictedHp.set(currentTarget, hp - estimateDamage(unit, fromX, fromY, currentTarget));
               attacksLeft -= 1;
               continue;
@@ -2476,7 +2499,7 @@
 
       plan.push({
         unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y, path: dest.path || [],
-        primaryStrikeTiles, previewStrikeTiles, knockbackTiles, isRetreat,
+        primaryStrikeTiles, previewStrikeTiles, isRetreat,
       });
     }
 
@@ -2870,23 +2893,6 @@
         ctx.restore();
       }
 
-      if (entry.knockbackTiles) {
-        entry.primaryStrikeTiles.forEach((strikeTile, i) => {
-          const push = entry.knockbackTiles[i];
-          if (!push) return;
-          ctx.save();
-          ctx.strokeStyle = '#7c3aed';
-          ctx.globalAlpha = 0.85;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(strikeTile.x * TILE + TILE / 2, strikeTile.y * TILE + TILE / 2);
-          ctx.lineTo(push.x * TILE + TILE / 2, push.y * TILE + TILE / 2);
-          ctx.stroke();
-          ctx.setLineDash([3, 2]);
-          ctx.strokeRect(push.x * TILE + 8, push.y * TILE + 8, TILE - 16, TILE - 16);
-          ctx.restore();
-        });
-      }
     });
 
     strikeCounts.forEach((count, key) => {
