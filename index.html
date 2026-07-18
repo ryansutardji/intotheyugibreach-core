@@ -1356,6 +1356,9 @@
       movedThisTurn: false, attacksUsed: 0, usedSacrifice: false, kills: 0,
       usedSurvive: false, usedRevive: false, usedFirstAttack: false,
       targetBuilding: null,
+      // Render-state only — decoupled from the logical fields above so combat
+      // stays instant/authoritative while draw() eases these toward it.
+      rOffX: 0, rOffY: 0, flashT: 0, displayHp: hp, fadeT: 0,
     };
   }
 
@@ -1666,7 +1669,7 @@
     // from before the unit-only `!defender.alive` check below, which would
     // otherwise silently no-op every attack against a building.
     if (defender.type === 'building') {
-      if (defender.hp <= 0) return;
+      if (defender.hp <= 0) return 0;
 
       const variance = 0.85 + Math.random() * 0.3;
       let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
@@ -1681,27 +1684,29 @@
         log('The building is destroyed!');
         onBuildingDestroyed(defender, attacker);
       }
-      return;
+      return dmg;
     }
 
-    if (!defender.alive) return;
+    if (!defender.alive) return 0;
 
     if (attacker.unitId === 'reaper_of_the_cards' && defender.hp / defender.maxHp <= 0.2) {
+      const prevHp = defender.hp;
       defender.hp = 0;
       defender.alive = false;
       log(labelOf(attacker) + ' reaps ' + labelOf(defender) + ', destroying it instantly!');
       onUnitDeath(defender, attacker);
-      return;
+      return prevHp;
     }
 
     if (attacker.unitId === 'barrel_dragon' && !attacker.usedFirstAttack) {
       attacker.usedFirstAttack = true;
       if (Math.random() < 0.375) {
+        const prevHp = defender.hp;
         defender.hp = 0;
         defender.alive = false;
         log(labelOf(attacker) + "'s triple cannon obliterates " + labelOf(defender) + ' instantly!');
         onUnitDeath(defender, attacker);
-        return;
+        return prevHp;
       }
     }
 
@@ -1714,7 +1719,7 @@
     if (defender.unitId === 'kuriboh' && !defender.usedSacrifice) {
       defender.usedSacrifice = true;
       log(labelOf(defender) + ' negated the attack!');
-      return;
+      return 0;
     }
 
     if (defender.unitId === 'sinister_serpent' && !defender.usedSurvive && dmg >= defender.hp) {
@@ -1771,6 +1776,8 @@
       }
       // Off-board or an occupied destination: the shove simply fails, no extra effect.
     }
+
+    return dmg;
   }
 
   function getAttackTargets(attacker, primaryDefender) {
@@ -1791,7 +1798,17 @@
 
   function resolveAttack(attacker, primaryDefender) {
     const targets = getAttackTargets(attacker, primaryDefender);
-    targets.forEach(target => applyAttackDamage(attacker, target));
+    const hits = targets.map(target => ({ target, dmg: applyAttackDamage(attacker, target) || 0 }));
+
+    // Units killed by this attack (not secondary deaths cascading out of
+    // onUnitDeath's abilities — those still vanish instantly, same as
+    // before) get a fade-out instead of disappearing the instant the main
+    // unit loop in draw() stops rendering them.
+    const deathPromises = hits
+      .filter(({ target }) => target.type !== 'building' && !target.alive && !fadingUnits.includes(target))
+      .map(({ target }) => animateDeath(target));
+
+    return Promise.all([animateAttack(attacker, hits), ...deathPromises]);
   }
 
   function checkGameOver() {
@@ -1937,12 +1954,14 @@
     }
 
     if (!target && !selectedUnit.hasMoved && reachableTiles.some(t => t.x === tx && t.y === ty)) {
+      const fromX = selectedUnit.x, fromY = selectedUnit.y;
       selectedUnit.x = tx;
       selectedUnit.y = ty;
       selectedUnit.hasMoved = true;
       selectedUnit.movedThisTurn = true;
       reachableTiles = [];
       attackableTargets = enemiesInRange(tx, ty, selectedUnit.range, 'player');
+      animateMove(selectedUnit, fromX, fromY);
       if (attackableTargets.length === 0) {
         finalize(selectedUnit);
       } else {
@@ -2526,6 +2545,7 @@
         dest = { x: stepX, y: stepY };
       }
 
+      const fromX = unit.x, fromY = unit.y;
       const didMove = dest.x !== unit.x || dest.y !== unit.y;
       if (didMove) {
         unit.x = dest.x;
@@ -2536,9 +2556,12 @@
       if (blockedBy) {
         log(labelOf(unit) + "'s path is blocked by " + labelOf(blockedBy) + '!');
       }
+      // The slide (or a short beat, if the unit held its tile) paces this step
+      // instead of a flat guessed delay — animateMove already seeds the offset
+      // before this render(), so the unit visually starts from its old tile.
+      const moveAnim = didMove ? animateMove(unit, fromX, fromY) : delay(150);
       render();
-
-      await delay(350);
+      await moveAnim;
 
       if (!entry.isRetreat) {
         let attacksLeft = attacksPerTurn(unit);
@@ -2547,12 +2570,11 @@
         // immediately rather than whiffing at the (now unreachable) planned tiles.
         if (blockedBy && blockedBy.team === 'player' && blockedBy.alive &&
             manhattan(unit.x, unit.y, blockedBy.x, blockedBy.y) <= unit.range) {
-          resolveAttack(unit, blockedBy);
+          await resolveAttack(unit, blockedBy);
           unit.attacksUsed += 1;
           attacksLeft -= 1;
           render();
           if (checkGameOver()) { aiRunning = false; return; }
-          await delay(400);
         }
 
         for (const strikeTile of entry.primaryStrikeTiles) {
@@ -2571,12 +2593,11 @@
             log(labelOf(unit) + ' strikes empty ground.');
             continue;
           }
-          resolveAttack(unit, target);
+          await resolveAttack(unit, target);
           unit.attacksUsed += 1;
           attacksLeft -= 1;
           render();
           if (checkGameOver()) { aiRunning = false; return; }
-          await delay(400);
         }
       }
     }
@@ -2672,30 +2693,140 @@
     });
   }
 
+  // ---------- Animation ----------
+  // Logical state (unit.x/y/hp/alive) still updates instantly, same as
+  // before — these tweens only drive what gets drawn, easing the render-state
+  // fields (rOffX/rOffY/flashT/displayHp/fadeT, set on each unit in makeUnit)
+  // toward the real values over a short duration instead of snapping.
+
+  let activeAnims = [];
+  let animRunning = false;
+  let floatingTexts = [];
+  let fadingUnits = [];
+
+  function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
+
+  function tickAnims(now) {
+    activeAnims = activeAnims.filter(a => !a.update(now));
+    draw();
+    if (activeAnims.length) requestAnimationFrame(tickAnims);
+    else animRunning = false;
+  }
+
+  function pushAnim(update) {
+    activeAnims.push({ update });
+    if (!animRunning) { animRunning = true; requestAnimationFrame(tickAnims); }
+  }
+
+  function tween(duration, onUpdate) {
+    const start = performance.now();
+    return new Promise(resolve => {
+      pushAnim(now => {
+        const t = Math.min(1, (now - start) / duration);
+        onUpdate(t);
+        if (t >= 1) { resolve(); return true; }
+        return false;
+      });
+    });
+  }
+
+  // Slides a unit's sprite in from its previous tile toward its already-
+  // applied logical position. The offset is seeded synchronously so the very
+  // next draw() (which usually happens before the first animation frame
+  // fires) already shows the unit at the old spot instead of popping to the
+  // new tile for one frame.
+  function animateMove(unit, fromX, fromY) {
+    const dx = (fromX - unit.x) * TILE, dy = (fromY - unit.y) * TILE;
+    unit.rOffX = dx;
+    unit.rOffY = dy;
+    return tween(200, t => {
+      const ease = easeOutQuad(t);
+      unit.rOffX = dx * (1 - ease);
+      unit.rOffY = dy * (1 - ease);
+    });
+  }
+
+  // Pushes a no-op tween alongside the floating text purely to keep the rAF
+  // loop (and therefore draw(), which fades/prunes floatingTexts by wall
+  // clock) alive for the text's full lifetime, even after any faster attack
+  // tweens sharing this animation batch have already resolved.
+  function spawnFloatingText(x, y, text, color) {
+    const duration = 600;
+    floatingTexts.push({ x, y, text, color, start: performance.now(), duration });
+    return tween(duration, () => {});
+  }
+
+  // Attacker lunges a few px toward the primary defender and back; every hit
+  // target (splash included) flashes and pops a floating damage number.
+  function animateAttack(attacker, hits) {
+    const anims = [];
+    const primary = hits[0] && hits[0].target;
+
+    if (primary) {
+      const dx = (primary.x - attacker.x) * TILE, dy = (primary.y - attacker.y) * TILE;
+      const dist = Math.hypot(dx, dy) || 1;
+      const lungeX = (dx / dist) * 10, lungeY = (dy / dist) * 10;
+      anims.push(tween(180, t => {
+        const ease = t < 0.5 ? easeOutQuad(t * 2) : 1 - easeOutQuad((t - 0.5) * 2);
+        attacker.rOffX = lungeX * ease;
+        attacker.rOffY = lungeY * ease;
+      }));
+    }
+
+    hits.forEach(({ target, dmg }) => {
+      const cx = target.x * TILE + TILE / 2, cy = target.y * TILE + TILE / 2;
+      if (dmg > 0) anims.push(spawnFloatingText(cx, cy, '-' + dmg, '#ef4444'));
+      if (typeof target.flashT === 'number') {
+        anims.push(tween(220, t => { target.flashT = 1 - t; }));
+      }
+    });
+
+    return Promise.all(anims);
+  }
+
+  // Keeps a destroyed unit drawn (shrinking, fading) for a beat instead of
+  // vanishing the instant `alive` flips false, since the main unit loop in
+  // draw() only renders units where u.alive is true.
+  function animateDeath(unit) {
+    fadingUnits.push(unit);
+    return tween(300, t => { unit.fadeT = t; }).then(() => {
+      fadingUnits = fadingUnits.filter(u => u !== unit);
+    });
+  }
+
   // ---------- Rendering ----------
 
-  function drawUnitSprite(u, cx, cy, size) {
+  function drawUnitSprite(u, cx, cy, size, alpha = 1) {
     const img = spriteImages[u.unitId];
+    const dx = cx + (u.rOffX || 0), dy = cy + (u.rOffY || 0);
 
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    ctx.arc(dx, dy, size, 0, Math.PI * 2);
     ctx.closePath();
     ctx.clip();
     if (img && img.complete && img.naturalWidth > 0) {
-      ctx.drawImage(img, cx - size, cy - size, size * 2, size * 2);
+      ctx.drawImage(img, dx - size, dy - size, size * 2, size * 2);
     } else {
       ctx.fillStyle = UNIT_COLORS[u.unitId] || '#999999';
-      ctx.fillRect(cx - size, cy - size, size * 2, size * 2);
+      ctx.fillRect(dx - size, dy - size, size * 2, size * 2);
+    }
+    if (u.flashT > 0) {
+      ctx.fillStyle = 'rgba(239, 68, 68, ' + (0.6 * u.flashT) + ')';
+      ctx.fillRect(dx - size, dy - size, size * 2, size * 2);
     }
     ctx.restore();
 
+    ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    ctx.arc(dx, dy, size, 0, Math.PI * 2);
     ctx.closePath();
     ctx.strokeStyle = TEAM_STROKE[u.team];
     ctx.lineWidth = 3;
     ctx.stroke();
+    ctx.restore();
   }
 
   // Renders the locked-in enemyPlan: where each living enemy will move, which tiles
@@ -2827,6 +2958,9 @@
       const cx = u.x * TILE + TILE / 2;
       const cy = u.y * TILE + TILE / 2;
 
+      u.displayHp += (u.hp - u.displayHp) * 0.25;
+      if (Math.abs(u.displayHp - u.hp) < 0.5) u.displayHp = u.hp;
+
       ctx.save();
       if (u.team === 'player' && u.turnDone) ctx.globalAlpha = 0.45;
 
@@ -2839,17 +2973,38 @@
       drawUnitSprite(u, cx, cy, 22);
 
       const barW = 40, barH = 6;
-      const barX = cx - barW / 2, barY = u.y * TILE + 6;
+      const barX = cx + (u.rOffX || 0) - barW / 2, barY = u.y * TILE + 6 + (u.rOffY || 0);
       ctx.fillStyle = '#000';
       ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
-      const pct = u.hp / u.maxHp;
+      const pct = u.displayHp / u.maxHp;
       ctx.fillStyle = pct > 0.5 ? '#8bac0f' : pct > 0.25 ? '#f0e68c' : '#ef4444';
       ctx.fillRect(barX, barY, barW * pct, barH);
 
       ctx.restore();
     });
 
+    fadingUnits.forEach(u => {
+      const cx = u.x * TILE + TILE / 2, cy = u.y * TILE + TILE / 2;
+      drawUnitSprite(u, cx, cy, 22 * (1 - u.fadeT * 0.4), 1 - u.fadeT);
+    });
+
     drawObjectiveUnitMarkers();
+    drawFloatingTexts();
+  }
+
+  function drawFloatingTexts() {
+    const now = performance.now();
+    floatingTexts = floatingTexts.filter(ft => (now - ft.start) < ft.duration);
+    floatingTexts.forEach(ft => {
+      const t = (now - ft.start) / ft.duration;
+      ctx.save();
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, ft.x, ft.y - 14 - t * 20);
+      ctx.restore();
+    });
   }
 
   // Pit hazard tiles — drawn early, same layer as the building tile markers, so
