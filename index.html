@@ -163,6 +163,20 @@
 
   #objective-status:empty { display: none; }
 
+  #synergy-status {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    color: #a5b4fc;
+    padding: 6px;
+    border: 1px solid #4c4a7a;
+    border-radius: 3px;
+    background: rgba(165, 180, 252, 0.08);
+    margin-top: 4px;
+  }
+
+  #synergy-status:empty { display: none; }
+
   .objective-banner {
     font-size: 11px;
     color: #f0e68c;
@@ -586,6 +600,62 @@
   .unit-db-header h1.title { flex: 1; }
   .unit-db-header button { flex: none; padding: 10px 16px; }
 
+  .glossary-tab-row { display: flex; gap: 8px; }
+
+  .glossary-tab {
+    flex: none;
+    width: auto;
+    background: #26263a;
+    color: #8bac0f;
+    border: 2px solid #44445a;
+    padding: 8px 14px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+
+  .glossary-tab:hover { border-color: #8bac0f; }
+  .glossary-tab.active { border-color: #facc15; background: #33331f; color: #facc15; }
+
+  #glossary-attributes-panel.hidden, #glossary-units-panel.hidden { display: none; }
+
+  .attribute-synergy-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+  }
+
+  .attribute-synergy-card {
+    background: #26263a;
+    border: 2px solid #44445a;
+    padding: 10px 12px;
+  }
+
+  .attribute-synergy-card h3 {
+    margin: 0 0 2px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #facc15;
+  }
+
+  .attribute-synergy-card .attribute-synergy-theme {
+    font-size: 10px;
+    color: #8bac0f;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+
+  .attribute-synergy-card .attribute-synergy-tier {
+    font-size: 11px;
+    color: #c9d6a3;
+    padding: 4px 0;
+    border-top: 1px solid #333850;
+  }
+
+  .attribute-synergy-card .attribute-synergy-tier:first-of-type { border-top: none; }
+
+  .attribute-synergy-card .attribute-synergy-tier b { color: #9bbc0f; }
+
   .unit-db-filters {
     display: flex;
     flex-wrap: wrap;
@@ -685,7 +755,7 @@
 </head>
 <body>
 
-<button id="unit-db-btn" class="unit-db-fab">UNIT DATABASE</button>
+<button id="unit-db-btn" class="unit-db-fab">GLOSSARY</button>
 
 <div id="title-screen">
   <h1 class="title">INTO THE YUGIBREACH</h1>
@@ -816,6 +886,7 @@
 
 <div class="game-container hidden">
   <div id="objective-status"></div>
+  <div id="synergy-status"></div>
 
   <div class="game-row">
   <div class="board-wrap">
@@ -876,37 +947,49 @@
 <div id="unit-db-overlay" class="hidden">
   <div class="unit-db-panel">
     <div class="unit-db-header">
-      <h1 class="title">UNIT DATABASE</h1>
+      <h1 class="title">GLOSSARY</h1>
       <button id="unit-db-close-btn">CLOSE</button>
     </div>
 
-    <div class="unit-db-filters">
-      <div class="filter-group">
-        <div class="filter-label">TEAM</div>
-        <div class="chip-row" id="filter-side-row"></div>
-      </div>
-      <div class="filter-group">
-        <div class="filter-label">ATTRIBUTE</div>
-        <div class="chip-row" id="filter-attribute-row"></div>
-      </div>
-      <div class="filter-group">
-        <div class="filter-label">TYPE</div>
-        <select id="filter-type-select"></select>
-      </div>
-      <div class="filter-group">
-        <div class="filter-label">COST</div>
-        <div class="chip-row" id="filter-cost-row"></div>
-      </div>
-      <button id="filter-reset-btn">RESET FILTERS</button>
+    <div class="glossary-tab-row" id="glossary-tab-row">
+      <button class="glossary-tab active" data-tab="units">UNITS</button>
+      <button class="glossary-tab" data-tab="attributes">ATTRIBUTES</button>
     </div>
 
-    <div id="unit-db-count" class="unit-db-count"></div>
+    <div id="glossary-units-panel">
+      <div class="unit-db-filters">
+        <div class="filter-group">
+          <div class="filter-label">TEAM</div>
+          <div class="chip-row" id="filter-side-row"></div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">ATTRIBUTE</div>
+          <div class="chip-row" id="filter-attribute-row"></div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">TYPE</div>
+          <select id="filter-type-select"></select>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">COST</div>
+          <div class="chip-row" id="filter-cost-row"></div>
+        </div>
+        <button id="filter-reset-btn">RESET FILTERS</button>
+      </div>
 
-    <div class="unit-db-table-wrap">
-      <table id="unit-db-table">
-        <thead><tr id="unit-db-head-row"></tr></thead>
-        <tbody id="unit-db-body"></tbody>
-      </table>
+      <div id="unit-db-count" class="unit-db-count"></div>
+
+      <div class="unit-db-table-wrap">
+        <table id="unit-db-table">
+          <thead><tr id="unit-db-head-row"></tr></thead>
+          <tbody id="unit-db-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="glossary-attributes-panel" class="hidden">
+      <div class="legend-note">Auto-chess-style team synergy: once a team has 2 living units sharing an Attribute, those units (and only those units) gain the Tier I bonus below; at 3, it upgrades to Tier II. No adjacency required — this is separate from any per-unit Type ability.</div>
+      <div id="attribute-synergy-list" class="attribute-synergy-list"></div>
     </div>
   </div>
 </div>
@@ -1046,6 +1129,7 @@
   const turnIndicatorEl = document.getElementById('turn-indicator');
   const roundCounterEl = document.getElementById('round-counter');
   const objectiveStatusEl = document.getElementById('objective-status');
+  const synergyStatusEl = document.getElementById('synergy-status');
   const unitInfoEl = document.getElementById('unit-info');
   const battleLogEl = document.getElementById('battle-log');
   const endTurnBtn = document.getElementById('end-turn-btn');
@@ -1082,6 +1166,10 @@
   const unitDbCountEl = document.getElementById('unit-db-count');
   const unitDbHeadRowEl = document.getElementById('unit-db-head-row');
   const unitDbBodyEl = document.getElementById('unit-db-body');
+  const glossaryTabRowEl = document.getElementById('glossary-tab-row');
+  const glossaryUnitsPanelEl = document.getElementById('glossary-units-panel');
+  const glossaryAttributesPanelEl = document.getElementById('glossary-attributes-panel');
+  const attributeSynergyListEl = document.getElementById('attribute-synergy-list');
   const startGameBtn = document.getElementById('start-game-btn');
   const missionIndicatorEl = document.getElementById('mission-indicator');
   const deployBtn = document.getElementById('deploy-btn');
@@ -1496,7 +1584,7 @@
     while (queue.length) {
       const cur = queue.shift();
       const dist = visited.get(cur.x + ',' + cur.y);
-      if (dist >= unit.move) continue;
+      if (dist >= effectiveMove(unit)) continue;
       const neighbors = [
         { x: cur.x + 1, y: cur.y }, { x: cur.x - 1, y: cur.y },
         { x: cur.x, y: cur.y + 1 }, { x: cur.x, y: cur.y - 1 },
@@ -1577,6 +1665,30 @@
     return units.filter(u => u.alive && u !== unit && u.team === unit.team && manhattan(u.x, u.y, unit.x, unit.y) === 1);
   }
 
+  // Auto-chess-style team synergy: each Attribute buffs only allies who share it,
+  // scaled by how many living copies of that attribute are on the whole team (2+
+  // = tier 1, 3+ = tier 2) — no adjacency required, unlike alliesAdjacentTo above.
+  // Index 0 of each array is "below tier 1" (no bonus); shared by both the live
+  // combat hooks and their deterministic AI-planning clones so a balance tweak
+  // only has one place to edit.
+  const ATTRIBUTE_SYNERGY = {
+    DARK:  [1, 1.08, 1.18],  // outgoing dmg multiplier, by tier
+    FIRE:  [1, 1.10, 1.20],  // outgoing dmg multiplier vs non-full-HP targets, by tier
+    EARTH: [1, 0.90, 0.80],  // incoming dmg multiplier, by tier
+    WATER: [0, 0.15, 0.30],  // dodge chance, by tier
+    WIND:  [0, 1, 2],        // bonus Move, by tier
+    LIGHT: [0, 0.10, 0.15],  // % max HP healed at turn start, by tier
+  };
+
+  function attributeSynergyTier(unit) {
+    const n = units.filter(u => u.alive && u.team === unit.team && u.attribute === unit.attribute).length;
+    return n >= 3 ? 2 : n >= 2 ? 1 : 0;
+  }
+
+  function effectiveMove(unit) {
+    return unit.move + (unit.attribute === 'WIND' ? ATTRIBUTE_SYNERGY.WIND[attributeSynergyTier(unit)] : 0);
+  }
+
   function attacksPerTurn(unit) {
     return unit.unitId === 'gemini_elf' ? 2 : 1;
   }
@@ -1618,6 +1730,8 @@
     if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
     if (attacker.unitId === 'injection_fairy_lily' && attacker.hp / attacker.maxHp < 0.5) mult *= 3;
     if (alliesAdjacentTo(attacker).some(a => a.unitId === 'time_wizard')) mult *= Math.random() < 0.5 ? 2 : 0;
+    if (attacker.attribute === 'DARK') mult *= ATTRIBUTE_SYNERGY.DARK[attributeSynergyTier(attacker)];
+    if (attacker.attribute === 'FIRE' && defender.hp < defender.maxHp) mult *= ATTRIBUTE_SYNERGY.FIRE[attributeSynergyTier(attacker)];
     return mult;
   }
 
@@ -1634,6 +1748,11 @@
     const defenderHazard = currentHazards().find(h => h.x === defender.x && h.y === defender.y);
     if (defenderHazard && defenderHazard.damageReductionPct != null) mult *= (1 - defenderHazard.damageReductionPct);
     if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
+    if (defender.attribute === 'EARTH') mult *= ATTRIBUTE_SYNERGY.EARTH[attributeSynergyTier(defender)];
+    if (defender.attribute === 'WATER') {
+      const dodgeChance = ATTRIBUTE_SYNERGY.WATER[attributeSynergyTier(defender)];
+      if (Math.random() < dodgeChance) mult *= 0;
+    }
     return mult;
   }
 
@@ -2214,6 +2333,27 @@
     if (attacker.unitId === 'feral_imp' && defender.hp / defender.maxHp < 0.5) mult *= 1.4;
     if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
     if (attacker.unitId === 'injection_fairy_lily' && attacker.hp / attacker.maxHp < 0.5) mult *= 3;
+    if (attacker.attribute === 'DARK') mult *= ATTRIBUTE_SYNERGY.DARK[attributeSynergyTier(attacker)];
+    if (attacker.attribute === 'FIRE' && defender.hp < defender.maxHp) mult *= ATTRIBUTE_SYNERGY.FIRE[attributeSynergyTier(attacker)];
+    return mult;
+  }
+
+  // A deterministic clone of incomingDamageMultiplier for planning-time use only,
+  // mirroring estimateOutgoingDamageMultiplier's treatment of Time Wizard's coin
+  // flip above: WATER's synergy dodge is a genuine chance-based roll at real
+  // execution time, so here it's replaced with its expected value (1 - chance)
+  // instead of actually being rolled, keeping the frozen enemy plan stable.
+  function estimateIncomingDamageMultiplier(attacker, defender) {
+    let mult = 1;
+    if (attacker.unitId !== 'summoned_skull') {
+      if (alliesAdjacentTo(defender).some(a => a.unitId === 'giant_soldier_of_stone')) mult *= 0.75;
+      if (defender.unitId === 'beaver_warrior' && !defender.movedThisTurn) mult *= 0.7;
+    }
+    const defenderHazard = currentHazards().find(h => h.x === defender.x && h.y === defender.y);
+    if (defenderHazard && defenderHazard.damageReductionPct != null) mult *= (1 - defenderHazard.damageReductionPct);
+    if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
+    if (defender.attribute === 'EARTH') mult *= ATTRIBUTE_SYNERGY.EARTH[attributeSynergyTier(defender)];
+    if (defender.attribute === 'WATER') mult *= (1 - ATTRIBUTE_SYNERGY.WATER[attributeSynergyTier(defender)]);
     return mult;
   }
 
@@ -2232,7 +2372,7 @@
     try {
       dmg = unit.atk + outgoingDamageBonusFlat(unit);
       dmg *= estimateOutgoingDamageMultiplier(unit, target);
-      dmg *= incomingDamageMultiplier(unit, target);
+      dmg *= estimateIncomingDamageMultiplier(unit, target);
     } finally {
       unit.movedThisTurn = origMoved;
     }
@@ -2861,6 +3001,16 @@
       }
     });
 
+    units.filter(u => u.alive && u.team === team && u.attribute === 'LIGHT').forEach(u => {
+      const pct = ATTRIBUTE_SYNERGY.LIGHT[attributeSynergyTier(u)];
+      if (pct === 0) return;
+      const healAmt = Math.min(Math.round(u.maxHp * pct), u.maxHp - u.hp);
+      if (healAmt > 0) {
+        u.hp += healAmt;
+        log(labelOf(u) + "'s light restores " + healAmt + ' HP.');
+      }
+    });
+
     units.filter(u => u.alive && u.team === team && u.unitId === 'jinzo').forEach(u => {
       const targets = units.filter(t => t.alive && t.team !== team && manhattan(t.x, t.y, u.x, u.y) === 1);
       targets.forEach(t => {
@@ -3300,6 +3450,30 @@
     draw();
     updateUnitInfo();
     renderObjectiveStatus();
+    renderAttributeSynergyStatus();
+  }
+
+  // Live readout of which Attribute synergy tiers are currently active for each
+  // side, recomputed every render() the same way renderObjectiveStatus is — so
+  // it stays in sync as units die and tiers rise or fall mid-battle.
+  function renderAttributeSynergyStatus() {
+    if ((phase !== 'battle' && phase !== 'placement') || !synergyStatusEl) return;
+
+    const lineFor = (team, label) => {
+      const seen = new Set();
+      const parts = [];
+      units.filter(u => u.alive && u.team === team).forEach(u => {
+        if (seen.has(u.attribute)) return;
+        seen.add(u.attribute);
+        const tier = attributeSynergyTier(u);
+        if (tier > 0) parts.push(u.attribute + ' ' + (tier === 2 ? 'II' : 'I'));
+      });
+      return parts.length ? label + ': ' + parts.join(', ') : '';
+    };
+
+    const playerLine = lineFor('player', 'YOUR SYNERGIES');
+    const enemyLine = lineFor('enemy', 'ENEMY SYNERGIES');
+    synergyStatusEl.textContent = [playerLine, enemyLine].filter(Boolean).join('   ·   ');
   }
 
   // Live objective status shown in the turn panel throughout the fight — the same
@@ -3353,7 +3527,7 @@
       '<div class="stat-row"><span>COST</span><span>' + u.cost + '</span></div>' +
       '<div class="stat-row"><span>HP</span><span>' + u.hp + ' / ' + u.maxHp + '</span></div>' +
       '<div class="stat-row"><span>ATK</span><span>' + u.atk + '</span></div>' +
-      '<div class="stat-row"><span>MOVE</span><span>' + u.move + '</span></div>' +
+      '<div class="stat-row"><span>MOVE</span><span>' + effectiveMove(u) + '</span></div>' +
       '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>' +
       '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>' +
       (u.isPriorityTarget ? '<div class="unit-effect" style="color:#facc15;">PRIORITY TARGET — destroying this unit wins the mission instantly.</div>' : '')
@@ -4509,13 +4683,64 @@
     unitDbCountEl.textContent = rows.length + ' / ' + dbAllUnits.length + ' units shown';
   }
 
+  // One-line flavor tag per Attribute, purely cosmetic — the actual numbers
+  // below are read straight off ATTRIBUTE_SYNERGY (defined near alliesAdjacentTo)
+  // so this glossary entry can never drift out of sync with the real buff math.
+  const ATTRIBUTE_THEME = {
+    DARK: 'Raw Aggression',
+    EARTH: 'Bulwark',
+    LIGHT: 'Radiant Ward',
+    WATER: 'Tidal Veil',
+    WIND: 'Gale Step',
+    FIRE: 'Wildfire',
+  };
+
+  function describeAttributeSynergyTier(attribute, tier) {
+    const v = ATTRIBUTE_SYNERGY[attribute][tier];
+    switch (attribute) {
+      case 'DARK': return '+' + Math.round((v - 1) * 100) + '% outgoing damage';
+      case 'FIRE': return '+' + Math.round((v - 1) * 100) + '% damage vs. targets not at full HP';
+      case 'EARTH': return '-' + Math.round((1 - v) * 100) + '% incoming damage';
+      case 'WATER': return Math.round(v * 100) + '% chance to fully evade an attack';
+      case 'WIND': return '+' + v + ' Move';
+      case 'LIGHT': return 'heals ' + Math.round(v * 100) + '% max HP at the start of its turn';
+      default: return '';
+    }
+  }
+
+  function renderAttributeSynergyGlossary() {
+    const attributesPresent = Array.from(new Set(dbAllUnits.map(u => u.attribute)));
+    const orderedAttributes = ATTRIBUTE_ORDER.filter(a => attributesPresent.includes(a))
+      .concat(attributesPresent.filter(a => !ATTRIBUTE_ORDER.includes(a)).sort());
+
+    attributeSynergyListEl.innerHTML = orderedAttributes.filter(a => ATTRIBUTE_SYNERGY[a]).map(a => (
+      '<div class="attribute-synergy-card">' +
+        '<h3>' + a + '</h3>' +
+        '<div class="attribute-synergy-theme">' + (ATTRIBUTE_THEME[a] || '') + '</div>' +
+        '<div class="attribute-synergy-tier"><b>TIER I</b> (2+ allies) — ' + describeAttributeSynergyTier(a, 1) + '</div>' +
+        '<div class="attribute-synergy-tier"><b>TIER II</b> (3+ allies) — ' + describeAttributeSynergyTier(a, 2) + '</div>' +
+      '</div>'
+    )).join('');
+  }
+
   function renderUnitDb() {
     renderUnitDbFilterControls();
     renderUnitDbTable();
+    renderAttributeSynergyGlossary();
+  }
+
+  function switchGlossaryTab(tab) {
+    const showUnits = tab === 'units';
+    glossaryUnitsPanelEl.classList.toggle('hidden', !showUnits);
+    glossaryAttributesPanelEl.classList.toggle('hidden', showUnits);
+    Array.from(glossaryTabRowEl.children).forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
   }
 
   function openUnitDb() {
     renderUnitDb();
+    switchGlossaryTab('units');
     unitDbOverlayEl.classList.remove('hidden');
   }
 
@@ -4525,6 +4750,12 @@
 
   unitDbBtn.addEventListener('click', openUnitDb);
   unitDbCloseBtn.addEventListener('click', closeUnitDb);
+
+  glossaryTabRowEl.addEventListener('click', (e) => {
+    const tab = e.target.dataset.tab;
+    if (!tab) return;
+    switchGlossaryTab(tab);
+  });
 
   filterSideRowEl.addEventListener('click', (e) => {
     const side = e.target.dataset.side;
