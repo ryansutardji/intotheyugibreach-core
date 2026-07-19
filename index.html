@@ -867,7 +867,7 @@
       <div class="legend-note">Click a unit, then a blue tile to move, then a red-outlined enemy to attack. Click your unit again to skip the attack.</div>
       <div class="legend-note">Enemy turn preview: orange dashed tile + line = where an enemy will move. Red tiles = where it will strike this turn — a numbered badge means it hits that tile more than once. Move off a red tile or kill the enemy first to prevent the hit. Gray dashed = an enemy retreating (it won't attack).</div>
       <div class="legend-note">Mission objectives: yellow ring = the enemy's priority target — destroying it wins instantly.</div>
-      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Every melee hit shoves the target back a tile — into a pit kills it, into a building damages the building, into another unit damages both. Solid orange tiles are your buildings — impassable, with their own HP bar when damaged. Lose every building and the mission ends in defeat, no matter what the stated objective is or how the rest of your squad is doing.</div>
+      <div class="legend-note">Terrain: purple dashed tiles are pits — impassable, and instantly destroy anything knocked into one. Slate dashed tiles are chasms — also impassable, but a knockback into one only deals impact damage and collapses the wall, leaving safe ground behind. Stone-gray tiles are mountains — passable, and halve damage taken by whoever's standing on them. Orange dashed tiles are lava — passable, but burn whoever's standing there for a chunk of damage at the start of their turn. Cyan dashed tiles are ice — passable, and frictionless: a knockback that lands on ice keeps sliding in the same direction until it reaches non-ice ground or hits something that stops it. Every melee hit shoves the target back a tile — into a pit kills it, into a chasm damages and collapses it, into a building damages the building, into another unit damages both. Solid orange tiles are your buildings — impassable, with their own HP bar when damaged. Lose every building and the mission ends in defeat, no matter what the stated objective is or how the rest of your squad is doing.</div>
     </div>
   </div>
   </div>
@@ -1025,6 +1025,22 @@
     spriteImages[id] = img;
   });
 
+  // Hazard tile art — keyed by hazard `type`, not a unit id, so it lives in its own
+  // assets/hazards/ folder rather than assets/sprites/ (see spriteImages above).
+  // Same preload-and-fall-back-to-flat-color pattern as unit sprites, used by
+  // drawHazardTileMarkers.
+  function hazardSpritePath(type) {
+    return 'assets/hazards/' + type + '.jpg';
+  }
+
+  const hazardSpriteImages = {};
+  ['pit', 'chasm', 'mountain', 'lava', 'ice'].forEach(type => {
+    const img = new Image();
+    img.onload = () => render();
+    img.src = hazardSpritePath(type);
+    hazardSpriteImages[type] = img;
+  });
+
   const canvas = document.getElementById('board');
   const ctx = canvas.getContext('2d');
   const turnIndicatorEl = document.getElementById('turn-indicator');
@@ -1166,20 +1182,44 @@
   }
 
   // ---------- Hazards ----------
-  // Each node gets a randomly rolled set of hazard (pit) tiles, decided once per run
-  // (see rollNodeHazards, called from startInitialDraft alongside rollNodeObjectives)
-  // and kept for the rest of that run — a page reload restores it from the save
-  // rather than re-rolling. Keyed by node id: array of tile descriptors
-  // { x, y, type: 'pit', impassable, lethalOnEntry }. Behavior is driven by the
-  // impassable/lethalOnEntry flags rather than branching on type, so future hazard
-  // types/properties (damageOnEntry, slowsMovement, ...) can be added without
-  // touching pathing/combat code.
+  // Each node gets a randomly rolled set of hazard tiles — position AND type
+  // (see HAZARD_TYPES below) — decided once per run (see rollNodeHazards, called
+  // from startInitialDraft alongside rollNodeObjectives) and kept for the rest of
+  // that run — a page reload restores it from the save rather than re-rolling.
+  // Keyed by node id: array of tile descriptors { x, y, type, impassable,
+  // lethalOnEntry?, damageReductionPct?, damageOverTime? }. Pathing and pit
+  // lethality remain purely driven by the impassable/lethalOnEntry flags, not
+  // type-string branching; mountain/lava's damage-modifying behavior is looked up
+  // by the presence of damageReductionPct/damageOverTime instead, since those
+  // effects can't be expressed as a plain boolean flag.
+  //
+  // nodeHazards itself is the persisted, rolled-once, read-only-after-roll store.
+  // battleHazards (declared with `buildings` above) is a per-attempt clone of the
+  // current node's entry, populated in enterPlacementPhase — in-battle mutation
+  // (a chasm collapsing after a knockback hit) only ever touches that clone, the
+  // same way in-battle building HP damage never mutates nodeBuildings.
   let nodeHazards = {};
+  let battleHazards = [];
 
   function currentHazards() {
     if (!currentNode) return [];
-    return nodeHazards[currentNode.id] || [];
+    return battleHazards;
   }
+
+  // The 5 hazard-tile flavors a rolled tile can become (see rollHazardsForNode) —
+  // each rolled position is independently and uniformly assigned one of these at
+  // roll time. ice's `slippery` flag is read by knockbackDestination, which keeps
+  // extending the knockback destination one tile further for as long as the
+  // current landing tile is slippery — every other hazard's behavior is fully
+  // resolved by applyAttackDamage/incomingDamageMultiplier/applyTurnStartEffects
+  // off the other flags, unaffected by slippery.
+  const HAZARD_TYPES = [
+    { type: 'pit', impassable: true, lethalOnEntry: true },
+    { type: 'chasm', impassable: true, lethalOnEntry: false },
+    { type: 'mountain', impassable: false, damageReductionPct: 0.5 },
+    { type: 'lava', impassable: false, damageOverTime: 8 },
+    { type: 'ice', impassable: false, slippery: true },
+  ];
 
   // Hazards only ever roll into the middle four columns — never the player's
   // deployment columns (PLAYER_ZONE_X, [0,1]) or the enemy's (AI_FRONT_X/AI_BACK_X,
@@ -1214,20 +1254,27 @@
     return reachedEnemySide;
   }
 
-  function rollHazardsForNode(node) {
+  function rollHazardsForNode() {
     const pool = [];
     HAZARD_COLUMNS.forEach(x => {
       for (let y = 0; y < GRID; y++) pool.push({ x, y });
     });
-    const count = Math.min(5, Math.max(1, Math.round(node.budget / 3)));
+    const count = 4;
 
     for (let attempt = 0; attempt < 50; attempt++) {
       const n = Math.max(0, count - Math.floor(attempt / 10));
       const shuffled = pool.slice().sort(() => Math.random() - 0.5);
       const chosen = shuffled.slice(0, n);
       const hazardSet = new Set(chosen.map(t => t.x + ',' + t.y));
+      // hazardsKeepBoardConnected treats every rolled position as blocking,
+      // regardless of which type ends up assigned below — intentionally
+      // conservative, since a passable type (mountain/lava) only ever makes the
+      // real board MORE connected than this check assumes, never less.
       if (n === 0 || hazardsKeepBoardConnected(hazardSet)) {
-        return chosen.map(t => ({ x: t.x, y: t.y, type: 'pit', impassable: true, lethalOnEntry: true }));
+        return chosen.map(t => ({
+          x: t.x, y: t.y,
+          ...HAZARD_TYPES[Math.floor(Math.random() * HAZARD_TYPES.length)],
+        }));
       }
     }
     return [];
@@ -1236,7 +1283,7 @@
   function rollNodeHazards() {
     const hazards = {};
     MAP_NODES.forEach(node => {
-      hazards[node.id] = rollHazardsForNode(node);
+      hazards[node.id] = rollHazardsForNode();
     });
     nodeHazards = hazards;
   }
@@ -1374,6 +1421,28 @@
     return buildings.find(b => b.hp > 0 && b.x === x && b.y === y) || null;
   }
 
+  // Whether a ranged attack along the straight line between two cardinally
+  // aligned tiles (same row or column) is unobstructed — an impassable hazard
+  // (pit/chasm) or a standing building anywhere strictly between them blocks
+  // the shot, same as they already block movement. Only meaningful when the
+  // two points share a row or column: every real "can this unit hit that tile"
+  // check in the game (enemiesInRange) is itself restricted to the 4 cardinal
+  // directions, so a diagonal pair never has a line to obstruct in the first
+  // place — returns true (unobstructed) for those, leaving whatever
+  // Manhattan-distance-only check called this to decide range on its own.
+  function hasLineOfSight(x1, y1, x2, y2) {
+    if (x1 !== x2 && y1 !== y2) return true;
+    const dx = Math.sign(x2 - x1), dy = Math.sign(y2 - y1);
+    let cx = x1 + dx, cy = y1 + dy;
+    while (cx !== x2 || cy !== y2) {
+      const hazard = currentHazards().find(h => h.x === cx && h.y === cy);
+      if (hazard && hazard.impassable) return false;
+      if (buildingAt(cx, cy)) return false;
+      cx += dx; cy += dy;
+    }
+    return true;
+  }
+
   function occupiedSet(excludeUnit, ignoreTeam) {
     const s = new Set();
     units.forEach(u => {
@@ -1462,6 +1531,13 @@
       for (let dist = 1; dist <= range; dist++) {
         const tx = x + dx * dist, ty = y + dy * dist;
         if (tx < 0 || tx >= GRID || ty < 0 || ty >= GRID) break;
+        // An impassable hazard (pit/chasm) or a standing building blocks the
+        // shot the same way it blocks movement — nothing past it in this
+        // direction is reachable, so stop the scan here without registering a
+        // hit at (or beyond) this tile.
+        const hazard = currentHazards().find(h => h.x === tx && h.y === ty);
+        if (hazard && hazard.impassable) break;
+        if (buildingAt(tx, ty)) break;
         const blocker = unitAt(tx, ty);
         if (blocker) {
           if (blocker.team !== team) result.push(blocker);
@@ -1551,6 +1627,12 @@
       if (alliesAdjacentTo(defender).some(a => a.unitId === 'giant_soldier_of_stone')) mult *= 0.75;
       if (defender.unitId === 'beaver_warrior' && !defender.movedThisTurn) mult *= 0.7;
     }
+    // Mountain terrain: flat defensive reduction for whoever's standing on it,
+    // independent of the summoned_skull piercing exception above (terrain, not a
+    // unit ability). Shared with estimateDamage's AI planning path for free,
+    // since this function isn't cloned the way outgoingDamageMultiplier is.
+    const defenderHazard = currentHazards().find(h => h.x === defender.x && h.y === defender.y);
+    if (defenderHazard && defenderHazard.damageReductionPct != null) mult *= (1 - defenderHazard.damageReductionPct);
     if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
     return mult;
   }
@@ -1559,14 +1641,31 @@
   // not applicable. Only defined for range-1 (melee) attacks, where attacker and
   // defender are guaranteed to be orthogonally adjacent, so "one tile further along
   // the same line" is always one of 4 unambiguous directions — there's no clean
-  // equivalent for a non-adjacent (ranged) attacker. Does not check occupancy or
-  // hazards; callers decide what a blocked destination means.
+  // equivalent for a non-adjacent (ranged) attacker.
+  //
+  // The immediate one-tile push is extended further, one tile at a time, for as
+  // long as the tile it would land on is ice (slippery: true) and open — ice has
+  // no friction to stop the slide, so the unit keeps going until it reaches a
+  // tile that isn't ice, or would be blocked (an occupied tile, or the board
+  // edge). Whatever tile the chain finally lands on is returned as-is; the
+  // caller (applyAttackDamage) still does all the resolution of what actually
+  // happens there (death/bump/collision/move) — this function only decides how
+  // far the push travels before that resolution happens. Every other hazard
+  // type (pit/chasm/mountain/lava) has no slippery flag, so a first landing tile
+  // on one of those returns immediately, exactly as before this loop existed.
   function knockbackDestination(attacker, defender) {
     if (manhattan(attacker.x, attacker.y, defender.x, defender.y) !== 1) return null;
     const dx = defender.x - attacker.x, dy = defender.y - attacker.y;
-    const dest = { x: defender.x + dx, y: defender.y + dy };
+    let dest = { x: defender.x + dx, y: defender.y + dy };
     if (dest.x < 0 || dest.x >= GRID || dest.y < 0 || dest.y >= GRID) return null;
-    return dest;
+    while (true) {
+      const hazard = currentHazards().find(h => h.x === dest.x && h.y === dest.y);
+      if (!hazard || !hazard.slippery) return dest;
+      if (buildingAt(dest.x, dest.y) || unitAt(dest.x, dest.y)) return dest;
+      const next = { x: dest.x + dx, y: dest.y + dy };
+      if (next.x < 0 || next.x >= GRID || next.y < 0 || next.y >= GRID) return dest;
+      dest = next;
+    }
   }
 
   function onUnitDeath(defender, attacker) {
@@ -1761,17 +1860,34 @@
     if (defender.alive) {
       const dest = knockbackDestination(attacker, defender);
       if (dest) {
-        const pit = currentHazards().find(h => h.x === dest.x && h.y === dest.y && h.impassable && h.lethalOnEntry);
+        const bumpDmg = 6;
+        const destHazard = currentHazards().find(h => h.x === dest.x && h.y === dest.y);
+        const pit = destHazard && destHazard.impassable && destHazard.lethalOnEntry;
+        const chasm = destHazard && destHazard.impassable && !destHazard.lethalOnEntry;
         const blockingBuilding = buildingAt(dest.x, dest.y);
         const blockingUnit = unitAt(dest.x, dest.y);
         if (pit) {
           defender.alive = false;
           log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a pit!');
           onUnitDeath(defender, attacker);
+        } else if (chasm) {
+          // Defender doesn't move — the chasm stays impassable for this hit — but
+          // takes the same fixed impact damage as slamming into a building, and
+          // the wall then collapses (becomes plain passable floor) for the rest
+          // of this battle attempt only; battleHazards is a per-attempt clone
+          // (see enterPlacementPhase), so it resets to blocking again next time
+          // this node is (re)entered.
+          defender.hp = Math.max(0, defender.hp - bumpDmg);
+          log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a chasm, dealing ' + bumpDmg + ' dmg! The wall crumbles.');
+          destHazard.impassable = false;
+          if (defender.hp <= 0) {
+            defender.alive = false;
+            log(labelOf(defender) + ' is destroyed!');
+            onUnitDeath(defender, attacker);
+          }
         } else if (blockingBuilding) {
           // Defender doesn't move — the building's tile stays impassable — only
           // the building takes the impact.
-          const bumpDmg = 6;
           blockingBuilding.hp = Math.max(0, blockingBuilding.hp - bumpDmg);
           log(labelOf(attacker) + ' shoves ' + labelOf(defender) + ' into a building, dealing ' + bumpDmg + ' dmg!');
           if (blockingBuilding.hp <= 0) {
@@ -1829,6 +1945,19 @@
   function resolveAttack(attacker, primaryDefender) {
     const targets = getAttackTargets(attacker, primaryDefender);
     const hits = targets.map(target => ({ target, dmg: applyAttackDamage(attacker, target) || 0 }));
+
+    // A player-turn attack can knock an enemy off the tile its telegraphed
+    // plan assumed (see knockbackDestination above) — repair that unit's
+    // enemyPlan entry immediately so the telegraph and, later, its actual
+    // turn both reflect where it truly ended up rather than replaying a
+    // stale pre-knockback plan.
+    if (currentTurn === 'player') {
+      hits.forEach(({ target }) => {
+        if (target.type !== 'building' && target.team === 'enemy' && target.alive) {
+          repairDriftedEnemyPlanEntry(target);
+        }
+      });
+    }
 
     // Units killed by this attack (not secondary deaths cascading out of
     // onUnitDeath's abilities — those still vanish instantly, same as
@@ -1928,15 +2057,6 @@
     u.turnDone = true;
     u.hasMoved = true;
     deselect();
-    maybeAutoEndPlayerTurn();
-  }
-
-  function maybeAutoEndPlayerTurn() {
-    if (gameOver) return;
-    const playerUnits = units.filter(u => u.team === 'player' && u.alive);
-    if (playerUnits.length > 0 && playerUnits.every(u => u.turnDone)) {
-      setTimeout(() => startEnemyTurn(), 350);
-    }
   }
 
   function handleBoardClick(tx, ty) {
@@ -2141,7 +2261,8 @@
     const origX = unit.x, origY = unit.y;
     unit.x = x; unit.y = y;
     let best = 0;
-    const inRangeBuildings = context.buildingsAlive.filter(b => manhattan(x, y, b.x, b.y) <= unit.range);
+    const inRangeBuildings = context.buildingsAlive.filter(b =>
+      manhattan(x, y, b.x, b.y) <= unit.range && hasLineOfSight(x, y, b.x, b.y));
     const inRangeUnits = enemiesInRange(x, y, unit.range, 'enemy');
     inRangeUnits.concat(inRangeBuildings).forEach(t => {
       const score = tierScoreForHit(unit, fromX, fromY, t, context);
@@ -2214,7 +2335,8 @@
   // broken by positionalBonus so escort/spacing nudges still apply among
   // otherwise-equal building-adjacent tiles.
   function bestBuildingStrikeTile(unit, tiles, building, context) {
-    const inRangeTiles = tiles.filter(t => manhattan(t.x, t.y, building.x, building.y) <= unit.range);
+    const inRangeTiles = tiles.filter(t =>
+      manhattan(t.x, t.y, building.x, building.y) <= unit.range && hasLineOfSight(t.x, t.y, building.x, building.y));
     let best = inRangeTiles[0], bestBonus = -Infinity;
     inRangeTiles.forEach(t => {
       const bonus = positionalBonus(unit, t, context);
@@ -2232,7 +2354,7 @@
   // false only when boxed in by allies with nothing legal to hit.
   function planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out) {
     const inRangeBuildings = includeBuildings ? buildings.filter(b => b.hp > 0 &&
-      manhattan(unit.x, unit.y, b.x, b.y) <= unit.range) : [];
+      manhattan(unit.x, unit.y, b.x, b.y) <= unit.range && hasLineOfSight(unit.x, unit.y, b.x, b.y)) : [];
     const inRange = enemiesInRange(unit.x, unit.y, unit.range, 'enemy').concat(inRangeBuildings);
     if (inRange.length > 0) {
       const primary = inRange.slice().sort((a, b) =>
@@ -2309,6 +2431,190 @@
     return { obj, buildingsAlive, markedTarget, escort, spacingMode };
   }
 
+  // Decides one enemy unit's move + attacks from its CURRENT unit.x/y, given a
+  // planning context already built for the current living-enemy roster. Used
+  // both by planEnemyTurn's initial full-turn pass and by replanSingleEnemyUnit's
+  // later single-unit "repair" call after the unit's real position has drifted
+  // from its plan (e.g. a mid-player-turn knockback). Temporarily commits
+  // unit.x/y to its chosen destination as part of scoring (existing behavior,
+  // unchanged) — callers are responsible for restoring the unit's real position
+  // afterward if that commit should not be visible yet. Returns null if there's
+  // no living player target to plan against.
+  function planOneEnemyUnit(unit, context) {
+    const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
+    // focusLowestHP (currently only boss units) locks onto a single target — the
+    // lowest-HP living player unit — instead of gravitating toward whichever
+    // target is nearest, so it reads as deliberate focus fire rather than the
+    // default nearest-target heuristic every other unit uses.
+    const focusLowestHP = !!UNIT_DATABASE[unit.unitId].focusLowestHP;
+    const targets = focusLowestHP
+      ? alivePlayers.slice().sort((a, b) => a.hp - b.hp).slice(0, 1)
+      : alivePlayers;
+    if (targets.length === 0) return null;
+
+    // neverRetreat (currently only boss units) ignores the low-HP retreat
+    // instinct every other enemy has — a boss keeps pressing the attack no
+    // matter how badly hurt it is.
+    const isRetreat = !UNIT_DATABASE[unit.unitId].neverRetreat && unit.hp / unit.maxHp < 0.3;
+    const tiles = bfsReachable(unit);
+    const fromX = unit.x, fromY = unit.y;
+
+    // Bosses (isBoss) are exempt from the building-priority rework entirely —
+    // their job is hunting down whichever unit is in their team's way, not
+    // attacking buildings themselves, so they keep the original scoring
+    // unconditionally, with buildings scrubbed out of the context they score
+    // against (scoringContext below) so they never even opportunistically snipe
+    // one. Missions with no buildings at all (targetBuilding stays null for
+    // everyone, see buildPlanningContext) fall back to the same original scoring
+    // for every unit, since there's no building objective to pursue on that map.
+    const isBoss = !!UNIT_DATABASE[unit.unitId].isBoss;
+    const useLegacyScoring = isBoss || !unit.targetBuilding;
+    const scoringContext = isBoss ? Object.assign({}, context, { buildingsAlive: [] }) : context;
+
+    let dest;
+    let dispatchMode = 'legacy'; // 'legacy' | 'building' | 'blocked' | 'advance'
+    if (isRetreat) {
+      dest = chooseAIMove(unit, tiles, targets, true);
+    } else if (useLegacyScoring) {
+      // Score every reachable tile by the best hit achievable from there, plus
+      // any positional pull (escort/spacing) — replacing the old pure-distance
+      // destination pick. rawHit (attack potential alone, ignoring positional
+      // pulls) is tracked separately from the combined total so the "nothing
+      // achievable anywhere" fallback below only fires when it's actually true,
+      // not just because some tile's positional bonus made its total positive.
+      let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
+      for (const tile of tiles) {
+        const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, scoringContext);
+        const total = rawHit + positionalBonus(unit, tile, scoringContext);
+        if (total > bestTotal) { bestTotal = total; bestTile = tile; }
+        if (rawHit > bestRawHit) bestRawHit = rawHit;
+      }
+      if (bestRawHit === 0) {
+        // No reachable tile puts anything in range this turn — beeline toward
+        // the nearest surviving building instead of the nearest player unit, and
+        // only fall back to players if there are no buildings left on the field
+        // at all (bosses always take this second branch straight away, since
+        // scoringContext already scrubbed buildingsAlive to empty for them).
+        // Reuses chooseAIMove's existing distance logic unchanged, just fed a
+        // buildings-first candidate list.
+        const fallbackTargets = scoringContext.buildingsAlive.length ? scoringContext.buildingsAlive : targets;
+        bestTile = chooseAIMove(unit, tiles, fallbackTargets, false);
+      }
+      dest = bestTile;
+    } else {
+      // The building-priority core: this unit's assigned building always wins
+      // unless the player is physically the only thing standing between it and
+      // that building this turn.
+      const building = unit.targetBuilding;
+      const canHitBuildingReal = tiles.some(t =>
+        manhattan(t.x, t.y, building.x, building.y) <= unit.range && hasLineOfSight(t.x, t.y, building.x, building.y));
+
+      if (canHitBuildingReal) {
+        dispatchMode = 'building';
+        dest = bestBuildingStrikeTile(unit, tiles, building, context);
+      } else {
+        // Would a tile that puts the building in range be reachable if player
+        // units weren't blocking? If so, they're the specific reason it can't
+        // get there — fight whatever's actually in the way instead. If not,
+        // it's just too far away this turn regardless of blocking, so advance.
+        const tilesIgnoringPlayers = bfsReachable(unit, 'player');
+        const canHitBuildingIgnoringPlayers = tilesIgnoringPlayers.some(
+          t => manhattan(t.x, t.y, building.x, building.y) <= unit.range && hasLineOfSight(t.x, t.y, building.x, building.y)
+        );
+
+        if (canHitBuildingIgnoringPlayers) {
+          // Restricted to units only (buildingsAlive: []) so this doesn't
+          // opportunistically snipe some other, non-assigned building instead of
+          // fighting the blocker — positionalBonus still sees the real context,
+          // so blockerBonus/escort/spacing keep working unchanged.
+          const unitOnlyContext = Object.assign({}, context, { buildingsAlive: [] });
+          let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
+          for (const tile of tiles) {
+            const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, unitOnlyContext);
+            const total = rawHit + positionalBonus(unit, tile, context);
+            if (total > bestTotal) { bestTotal = total; bestTile = tile; }
+            if (rawHit > bestRawHit) bestRawHit = rawHit;
+          }
+          if (bestRawHit === 0) {
+            // Blocked by the reachability test above, but nothing actually within
+            // weapon range from any reachable tile (rare geometry corner case) —
+            // degrade to a plain advance rather than a fight with nothing to hit.
+            dispatchMode = 'advance';
+            dest = chooseAIMove(unit, tiles, [building], false);
+          } else {
+            dispatchMode = 'blocked';
+            dest = bestTile;
+          }
+        } else {
+          dispatchMode = 'advance';
+          dest = chooseAIMove(unit, tiles, [building], false);
+        }
+      }
+    }
+
+    unit.x = dest.x;
+    unit.y = dest.y;
+
+    // primaryStrikeTiles drives execution (one entry per attack instance, reusing
+    // resolveAttack/getAttackTargets exactly as before). previewStrikeTiles is the
+    // fully expanded set (including Dark Magician's whole row/column) shown to the
+    // player during the telegraph, which can be a superset of primaryStrikeTiles.
+    const primaryStrikeTiles = [];
+    const previewStrikeTiles = [];
+
+    if (!isRetreat) {
+      let attacksLeft = attacksPerTurn(unit);
+      const out = { primaryStrikeTiles, previewStrikeTiles };
+
+      if (dispatchMode === 'building') {
+        // Force the building line of attack for as long as it (or another
+        // surviving building also now in range) has predicted HP left — this is
+        // the one case tierScoreForHit's own ranking would get "wrong" relative
+        // to the new priority (today a unit-kill outscores a building chip), so
+        // it's bypassed entirely rather than left to the numeric ranking.
+        const predictedHp = new Map();
+        let currentTarget = unit.targetBuilding;
+        while (attacksLeft > 0) {
+          const hp = predictedHp.has(currentTarget) ? predictedHp.get(currentTarget) : currentTarget.hp;
+          const inRangeNow = hp > 0 && manhattan(unit.x, unit.y, currentTarget.x, currentTarget.y) <= unit.range &&
+            hasLineOfSight(unit.x, unit.y, currentTarget.x, currentTarget.y);
+          if (inRangeNow) {
+            primaryStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
+            previewStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
+            predictedHp.set(currentTarget, hp - estimateDamage(unit, fromX, fromY, currentTarget));
+            attacksLeft -= 1;
+            continue;
+          }
+          const next = context.buildingsAlive.find(b => b !== currentTarget &&
+            (predictedHp.has(b) ? predictedHp.get(b) : b.hp) > 0 &&
+            manhattan(unit.x, unit.y, b.x, b.y) <= unit.range && hasLineOfSight(unit.x, unit.y, b.x, b.y));
+          if (next) { currentTarget = next; continue; }
+          break; // nothing building-side left in range — hand any remaining attacks to standard ranking
+        }
+        while (attacksLeft > 0) {
+          if (!planStandardAttackInstance(unit, context, fromX, fromY, true, out)) break;
+          attacksLeft -= 1;
+        }
+      } else {
+        // legacy/advance keep considering buildings opportunistically, same as
+        // today; blocked is restricted to units so it stays focused on the fight
+        // it was forced into rather than being pulled off onto some other
+        // building. Bosses never consider buildings at all, even opportunistically
+        // — they exist purely to hunt down player units (see scoringContext above).
+        const includeBuildings = dispatchMode !== 'blocked' && !isBoss;
+        while (attacksLeft > 0) {
+          if (!planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out)) break;
+          attacksLeft -= 1;
+        }
+      }
+    }
+
+    return {
+      unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y, path: dest.path || [],
+      primaryStrikeTiles, previewStrikeTiles, isRetreat,
+    };
+  }
+
   function planEnemyTurn() {
     const enemyUnits = units.filter(u => u.team === 'enemy' && u.alive);
     const context = buildPlanningContext(enemyUnits);
@@ -2329,178 +2635,9 @@
     }
 
     const plan = [];
-
     for (const unit of orderedEnemyUnits) {
-      const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
-      // focusLowestHP (currently only boss units) locks onto a single target — the
-      // lowest-HP living player unit — instead of gravitating toward whichever
-      // target is nearest, so it reads as deliberate focus fire rather than the
-      // default nearest-target heuristic every other unit uses.
-      const focusLowestHP = !!UNIT_DATABASE[unit.unitId].focusLowestHP;
-      const targets = focusLowestHP
-        ? alivePlayers.slice().sort((a, b) => a.hp - b.hp).slice(0, 1)
-        : alivePlayers;
-      if (targets.length === 0) break;
-
-      // neverRetreat (currently only boss units) ignores the low-HP retreat
-      // instinct every other enemy has — a boss keeps pressing the attack no
-      // matter how badly hurt it is.
-      const isRetreat = !UNIT_DATABASE[unit.unitId].neverRetreat && unit.hp / unit.maxHp < 0.3;
-      const tiles = bfsReachable(unit);
-      const fromX = unit.x, fromY = unit.y;
-
-      // Bosses (isBoss) are exempt from the building-priority rework entirely —
-      // their job is hunting down whichever unit is in their team's way, not
-      // attacking buildings themselves, so they keep the original scoring
-      // unconditionally, with buildings scrubbed out of the context they score
-      // against (scoringContext below) so they never even opportunistically snipe
-      // one. Missions with no buildings at all (targetBuilding stays null for
-      // everyone, see buildPlanningContext) fall back to the same original scoring
-      // for every unit, since there's no building objective to pursue on that map.
-      const isBoss = !!UNIT_DATABASE[unit.unitId].isBoss;
-      const useLegacyScoring = isBoss || !unit.targetBuilding;
-      const scoringContext = isBoss ? Object.assign({}, context, { buildingsAlive: [] }) : context;
-
-      let dest;
-      let dispatchMode = 'legacy'; // 'legacy' | 'building' | 'blocked' | 'advance'
-      if (isRetreat) {
-        dest = chooseAIMove(unit, tiles, targets, true);
-      } else if (useLegacyScoring) {
-        // Score every reachable tile by the best hit achievable from there, plus
-        // any positional pull (escort/spacing) — replacing the old pure-distance
-        // destination pick. rawHit (attack potential alone, ignoring positional
-        // pulls) is tracked separately from the combined total so the "nothing
-        // achievable anywhere" fallback below only fires when it's actually true,
-        // not just because some tile's positional bonus made its total positive.
-        let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
-        for (const tile of tiles) {
-          const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, scoringContext);
-          const total = rawHit + positionalBonus(unit, tile, scoringContext);
-          if (total > bestTotal) { bestTotal = total; bestTile = tile; }
-          if (rawHit > bestRawHit) bestRawHit = rawHit;
-        }
-        if (bestRawHit === 0) {
-          // No reachable tile puts anything in range this turn — beeline toward
-          // the nearest surviving building instead of the nearest player unit, and
-          // only fall back to players if there are no buildings left on the field
-          // at all (bosses always take this second branch straight away, since
-          // scoringContext already scrubbed buildingsAlive to empty for them).
-          // Reuses chooseAIMove's existing distance logic unchanged, just fed a
-          // buildings-first candidate list.
-          const fallbackTargets = scoringContext.buildingsAlive.length ? scoringContext.buildingsAlive : targets;
-          bestTile = chooseAIMove(unit, tiles, fallbackTargets, false);
-        }
-        dest = bestTile;
-      } else {
-        // The building-priority core: this unit's assigned building always wins
-        // unless the player is physically the only thing standing between it and
-        // that building this turn.
-        const building = unit.targetBuilding;
-        const canHitBuildingReal = tiles.some(t => manhattan(t.x, t.y, building.x, building.y) <= unit.range);
-
-        if (canHitBuildingReal) {
-          dispatchMode = 'building';
-          dest = bestBuildingStrikeTile(unit, tiles, building, context);
-        } else {
-          // Would a tile that puts the building in range be reachable if player
-          // units weren't blocking? If so, they're the specific reason it can't
-          // get there — fight whatever's actually in the way instead. If not,
-          // it's just too far away this turn regardless of blocking, so advance.
-          const tilesIgnoringPlayers = bfsReachable(unit, 'player');
-          const canHitBuildingIgnoringPlayers = tilesIgnoringPlayers.some(
-            t => manhattan(t.x, t.y, building.x, building.y) <= unit.range
-          );
-
-          if (canHitBuildingIgnoringPlayers) {
-            // Restricted to units only (buildingsAlive: []) so this doesn't
-            // opportunistically snipe some other, non-assigned building instead of
-            // fighting the blocker — positionalBonus still sees the real context,
-            // so blockerBonus/escort/spacing keep working unchanged.
-            const unitOnlyContext = Object.assign({}, context, { buildingsAlive: [] });
-            let bestTile = tiles[0], bestTotal = -Infinity, bestRawHit = 0;
-            for (const tile of tiles) {
-              const rawHit = bestAchievableHitScore(unit, tile.x, tile.y, fromX, fromY, unitOnlyContext);
-              const total = rawHit + positionalBonus(unit, tile, context);
-              if (total > bestTotal) { bestTotal = total; bestTile = tile; }
-              if (rawHit > bestRawHit) bestRawHit = rawHit;
-            }
-            if (bestRawHit === 0) {
-              // Blocked by the reachability test above, but nothing actually within
-              // weapon range from any reachable tile (rare geometry corner case) —
-              // degrade to a plain advance rather than a fight with nothing to hit.
-              dispatchMode = 'advance';
-              dest = chooseAIMove(unit, tiles, [building], false);
-            } else {
-              dispatchMode = 'blocked';
-              dest = bestTile;
-            }
-          } else {
-            dispatchMode = 'advance';
-            dest = chooseAIMove(unit, tiles, [building], false);
-          }
-        }
-      }
-
-      unit.x = dest.x;
-      unit.y = dest.y;
-
-      // primaryStrikeTiles drives execution (one entry per attack instance, reusing
-      // resolveAttack/getAttackTargets exactly as before). previewStrikeTiles is the
-      // fully expanded set (including Dark Magician's whole row/column) shown to the
-      // player during the telegraph, which can be a superset of primaryStrikeTiles.
-      const primaryStrikeTiles = [];
-      const previewStrikeTiles = [];
-
-      if (!isRetreat) {
-        let attacksLeft = attacksPerTurn(unit);
-        const out = { primaryStrikeTiles, previewStrikeTiles };
-
-        if (dispatchMode === 'building') {
-          // Force the building line of attack for as long as it (or another
-          // surviving building also now in range) has predicted HP left — this is
-          // the one case tierScoreForHit's own ranking would get "wrong" relative
-          // to the new priority (today a unit-kill outscores a building chip), so
-          // it's bypassed entirely rather than left to the numeric ranking.
-          const predictedHp = new Map();
-          let currentTarget = unit.targetBuilding;
-          while (attacksLeft > 0) {
-            const hp = predictedHp.has(currentTarget) ? predictedHp.get(currentTarget) : currentTarget.hp;
-            const inRangeNow = hp > 0 && manhattan(unit.x, unit.y, currentTarget.x, currentTarget.y) <= unit.range;
-            if (inRangeNow) {
-              primaryStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
-              previewStrikeTiles.push({ x: currentTarget.x, y: currentTarget.y });
-              predictedHp.set(currentTarget, hp - estimateDamage(unit, fromX, fromY, currentTarget));
-              attacksLeft -= 1;
-              continue;
-            }
-            const next = context.buildingsAlive.find(b => b !== currentTarget &&
-              (predictedHp.has(b) ? predictedHp.get(b) : b.hp) > 0 &&
-              manhattan(unit.x, unit.y, b.x, b.y) <= unit.range);
-            if (next) { currentTarget = next; continue; }
-            break; // nothing building-side left in range — hand any remaining attacks to standard ranking
-          }
-          while (attacksLeft > 0) {
-            if (!planStandardAttackInstance(unit, context, fromX, fromY, true, out)) break;
-            attacksLeft -= 1;
-          }
-        } else {
-          // legacy/advance keep considering buildings opportunistically, same as
-          // today; blocked is restricted to units so it stays focused on the fight
-          // it was forced into rather than being pulled off onto some other
-          // building. Bosses never consider buildings at all, even opportunistically
-          // — they exist purely to hunt down player units (see scoringContext above).
-          const includeBuildings = dispatchMode !== 'blocked' && !isBoss;
-          while (attacksLeft > 0) {
-            if (!planStandardAttackInstance(unit, context, fromX, fromY, includeBuildings, out)) break;
-            attacksLeft -= 1;
-          }
-        }
-      }
-
-      plan.push({
-        unitId: unit.id, fromX, fromY, destX: dest.x, destY: dest.y, path: dest.path || [],
-        primaryStrikeTiles, previewStrikeTiles, isRetreat,
-      });
+      const entry = planOneEnemyUnit(unit, context);
+      if (entry) plan.push(entry);
     }
 
     // Planning must not have any visible effect until the turn actually executes.
@@ -2510,6 +2647,40 @@
     });
 
     return plan;
+  }
+
+  // Recomputes a single enemy's plan as if planEnemyTurn were being called for
+  // just this unit right now, from its true current position. Rebuilds
+  // buildPlanningContext fresh (not reused from turn-start) since it mutates
+  // sticky targetBuilding assignment and reads live board state, either of
+  // which may have changed since the last full plan. Undoes planOneEnemyUnit's
+  // temporary x/y scoring commit before returning so this never leaves a
+  // phantom position visible between calls. Returns null if there's no living
+  // player target left to plan against.
+  function replanSingleEnemyUnit(unit) {
+    const enemyUnitsNow = units.filter(u => u.team === 'enemy' && u.alive);
+    const context = buildPlanningContext(enemyUnitsNow);
+    const trueX = unit.x, trueY = unit.y;
+    const newEntry = planOneEnemyUnit(unit, context);
+    unit.x = trueX; unit.y = trueY;
+    return newEntry;
+  }
+
+  // Call whenever `unit` (a living enemy) may have been displaced since
+  // enemyPlan was last built — currently the only source of this is a
+  // mid-player-turn knockback (see resolveAttack). No-op if the unit has no
+  // plan entry, or its entry's fromX/fromY still matches its true position
+  // (nothing to repair). Replaces the stale entry in place so telegraph and
+  // execution order are preserved; drops the entry entirely if replanning
+  // finds nothing left for the unit to do.
+  function repairDriftedEnemyPlanEntry(unit) {
+    const idx = enemyPlan.findIndex(e => e.unitId === unit.id);
+    if (idx === -1) return;
+    const entry = enemyPlan[idx];
+    if (unit.x === entry.fromX && unit.y === entry.fromY) return;
+    const newEntry = replanSingleEnemyUnit(unit);
+    if (newEntry) enemyPlan[idx] = newEntry;
+    else enemyPlan.splice(idx, 1);
   }
 
   async function startEnemyTurn() {
@@ -2537,9 +2708,19 @@
     const plan = enemyPlan;
     enemyPlan = [];
 
-    for (const entry of plan) {
+    for (let entry of plan) {
       const unit = units.find(u => u.id === entry.unitId);
       if (!unit || !unit.alive || gameOver) continue;
+
+      // Defense-in-depth: the live telegraph repair in resolveAttack should
+      // already keep every entry in sync with reality, but re-verify here in
+      // case a unit ever drifted from its plan without going through that
+      // hook, so execution never replays a stale pre-knockback plan.
+      if (unit.x !== entry.fromX || unit.y !== entry.fromY) {
+        const repaired = replanSingleEnemyUnit(unit);
+        if (!repaired) continue;
+        entry = repaired;
+      }
 
       await delay(400);
 
@@ -2592,7 +2773,8 @@
         // Stopped short by a player unit standing in the way — strike back at it
         // immediately rather than whiffing at the (now unreachable) planned tiles.
         if (blockedBy && blockedBy.team === 'player' && blockedBy.alive &&
-            manhattan(unit.x, unit.y, blockedBy.x, blockedBy.y) <= unit.range) {
+            manhattan(unit.x, unit.y, blockedBy.x, blockedBy.y) <= unit.range &&
+            hasLineOfSight(unit.x, unit.y, blockedBy.x, blockedBy.y)) {
           await resolveAttack(unit, blockedBy);
           unit.attacksUsed += 1;
           attacksLeft -= 1;
@@ -2603,7 +2785,8 @@
         for (const strikeTile of entry.primaryStrikeTiles) {
           if (attacksLeft <= 0) break;
           if (!unit.alive || gameOver) break;
-          if (manhattan(unit.x, unit.y, strikeTile.x, strikeTile.y) > unit.range) {
+          if (manhattan(unit.x, unit.y, strikeTile.x, strikeTile.y) > unit.range ||
+              !hasLineOfSight(unit.x, unit.y, strikeTile.x, strikeTile.y)) {
             log(labelOf(unit) + "'s attack falls short.");
             continue;
           }
@@ -2690,6 +2873,24 @@
           onUnitDeath(t, u);
         }
       });
+    });
+
+    // Lava tiles burn whoever's standing on them at the start of their team's
+    // turn, whether they walked on voluntarily or were knocked in — no natural
+    // "attacker" for environmental damage, so a lava death self-credits the kill
+    // (onUnitDeath(u, u)), the same tolerated pattern already used when
+    // man_eater_bug's retaliation credits an already-dead unit above.
+    units.filter(u => u.alive && u.team === team).forEach(u => {
+      const hazard = currentHazards().find(h => h.x === u.x && h.y === u.y);
+      if (!hazard || hazard.damageOverTime == null) return;
+      const dmg = hazard.damageOverTime;
+      u.hp = Math.max(0, u.hp - dmg);
+      log(labelOf(u) + ' is scorched by lava for ' + dmg + ' dmg.');
+      if (u.hp <= 0) {
+        u.alive = false;
+        log(labelOf(u) + ' is destroyed!');
+        onUnitDeath(u, u);
+      }
     });
 
     // Chaos Emperor Dragon detonates on a fixed 5-round cadence (round % 5 === 0)
@@ -3013,17 +3214,42 @@
     });
   }
 
-  // Pit hazard tiles — drawn early, same layer as the building tile markers, so
-  // units standing next to (or knocked onto) one stay fully visible.
+  // Hazard tiles — drawn early, same layer as the building tile markers, so
+  // units standing next to (or knocked onto) one stay fully visible. Each type
+  // gets full-tile card art (hazardSpriteImages, see spriteImages above) so
+  // its identity reads at a glance, plus a per-type colored dashed border on
+  // top for a quick-glance category cue even before the art loads. Falls back
+  // to a flat color fill (same per-type colors as the border) if the art
+  // hasn't finished loading yet — same graceful-degradation pattern as
+  // drawUnitSprite's img.complete/naturalWidth guard.
+  const HAZARD_COLORS = {
+    pit: { fill: 'rgba(124, 58, 237, 0.30)', stroke: '#7c3aed' },
+    chasm: { fill: 'rgba(100, 116, 139, 0.30)', stroke: '#64748b' },
+    mountain: { fill: 'rgba(120, 113, 108, 0.30)', stroke: '#78716c' },
+    lava: { fill: 'rgba(234, 88, 12, 0.30)', stroke: '#ea580c' },
+    ice: { fill: 'rgba(34, 211, 238, 0.30)', stroke: '#22d3ee' },
+  };
+
   function drawHazardTileMarkers() {
     currentHazards().forEach(h => {
+      // A collapsed chasm (impassable flipped false by a knockback hit, see
+      // applyAttackDamage) is safe ground again for the rest of this attempt —
+      // stop drawing it so the board reads as plain floor there.
+      if (h.type === 'chasm' && !h.impassable) return;
+      const c = HAZARD_COLORS[h.type] || HAZARD_COLORS.pit;
+      const tx = h.x * TILE, ty = h.y * TILE;
+      const img = hazardSpriteImages[h.type];
       ctx.save();
-      ctx.fillStyle = 'rgba(124, 58, 237, 0.30)';
-      ctx.fillRect(h.x * TILE, h.y * TILE, TILE, TILE);
-      ctx.strokeStyle = '#7c3aed';
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, tx, ty, TILE, TILE);
+      } else {
+        ctx.fillStyle = c.fill;
+        ctx.fillRect(tx, ty, TILE, TILE);
+      }
+      ctx.strokeStyle = c.stroke;
       ctx.lineWidth = 3;
       ctx.setLineDash([2, 3]);
-      ctx.strokeRect(h.x * TILE + 4, h.y * TILE + 4, TILE - 8, TILE - 8);
+      ctx.strokeRect(tx + 4, ty + 4, TILE - 8, TILE - 8);
       ctx.restore();
     });
   }
@@ -3205,6 +3431,7 @@
     phase = 'draft';
     units = [];
     buildings = [];
+    battleHazards = [];
     nextId = 1;
     currentTurn = 'player';
     round = 1;
@@ -4028,6 +4255,10 @@
     // Clone so in-battle HP damage never mutates the persisted per-node layout —
     // each new attempt at this node starts every building back at full HP.
     buildings = (nodeBuildings[currentNode.id] || []).map(b => ({ ...b }));
+    // Same clone-per-attempt treatment for hazards — a chasm collapsing after a
+    // knockback hit only ever mutates this clone, so every fresh attempt at this
+    // node starts every chasm un-collapsed again.
+    battleHazards = (nodeHazards[currentNode.id] || []).map(h => ({ ...h }));
     pendingPlayerUnits = activeRoster.map(entry => entry.rosterId);
     selectedPlacementRosterId = null;
     selectedUnit = null;
