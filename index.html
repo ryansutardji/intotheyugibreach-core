@@ -1466,9 +1466,12 @@
   let reachableTiles = [];
   let attackableTargets = [];
   let hoveredTile = null;
+  // Penguin Soldier "carry mode": while set, reachableTiles holds the carried
+  // ally's own destination options (rooted at the ally's tile, capped by Penguin
+  // Soldier's move stat) instead of Penguin Soldier's — handleBoardClick routes
+  // clicks through carryAllyClick instead of the normal flow until this clears.
+  let repositionAlly = null;
 
-  let playerDeaths = 0;
-  let enemyDeaths = 0;
   let playerInsectDeaths = 0;
   let enemyInsectDeaths = 0;
 
@@ -1483,13 +1486,20 @@
   function makeUnit(team, unitId, x, y, rosterId = null, level = 1) {
     const t = UNIT_DATABASE[unitId];
     const { hp, atk } = statsForLevel(unitId, level);
+    // dark_magician_girl's per-ally-death ATK growth is stored on her roster
+    // entry (bonusAtk) so it carries over into future battles instead of
+    // resetting — enemy-side units have no roster entry (rosterId stays null),
+    // so this is always 0 for them.
+    const rosterEntry = rosterId != null ? findRosterEntry(rosterId) : null;
+    const bonusAtk = rosterEntry ? (rosterEntry.bonusAtk || 0) : 0;
     return {
       id: nextId++, team, unitId, rosterId, x, y,
       name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
-      hp, maxHp: hp, atk, move: t.move, range: t.range, level,
+      hp, maxHp: hp, atk: atk + bonusAtk, move: t.move, range: t.range, level,
       alive: true, hasMoved: false, turnDone: false,
       movedThisTurn: false, attacksUsed: 0, usedSacrifice: false, kills: 0,
       usedSurvive: false, usedRevive: false, usedFirstAttack: false,
+      wasAttackedThisTurn: false, usedSkyScoutDashThisTurn: false,
       targetBuilding: null,
       // Render-state only — decoupled from the logical fields above so combat
       // stays instant/authoritative while draw() eases these toward it.
@@ -1557,7 +1567,7 @@
   // blocking?" — used by planEnemyTurn to tell "genuinely blocked by the player"
   // apart from "just too far away this turn." Since removing blockers can only add
   // reachable tiles, never remove any, this is always a superset of the real result.
-  function bfsReachable(unit, ignoreTeam) {
+  function bfsReachable(unit, ignoreTeam, moveOverride) {
     const occupied = occupiedSet(unit, ignoreTeam);
     // Impassable hazard tiles (pits) and impassable building tiles are folded into
     // the same blocked-tile check as occupied tiles: a normal unit can neither pass
@@ -1584,7 +1594,7 @@
     while (queue.length) {
       const cur = queue.shift();
       const dist = visited.get(cur.x + ',' + cur.y);
-      if (dist >= effectiveMove(unit)) continue;
+      if (dist >= (moveOverride != null ? moveOverride : effectiveMove(unit))) continue;
       const neighbors = [
         { x: cur.x + 1, y: cur.y }, { x: cur.x - 1, y: cur.y },
         { x: cur.x, y: cur.y + 1 }, { x: cur.x, y: cur.y - 1 },
@@ -1690,7 +1700,7 @@
   }
 
   function attacksPerTurn(unit) {
-    return unit.unitId === 'gemini_elf' ? 2 : 1;
+    return (unit.unitId === 'gemini_elf' || unit.unitId === 'flame_cerebrus') ? 2 : 1;
   }
 
   function outgoingDamageBonusFlat(attacker) {
@@ -1712,10 +1722,6 @@
       if (alliesAdjacentTo(attacker).some(a => a.unitId === 'troop_dragon')) bonus += 5;
     }
 
-    if (attacker.unitId === 'dark_magician_girl') {
-      bonus += 2 * (attacker.team === 'player' ? playerDeaths : enemyDeaths);
-    }
-
     if (attacker.unitId === 'insect_queen') {
       bonus += 3 * (attacker.team === 'player' ? playerInsectDeaths : enemyInsectDeaths);
     }
@@ -1730,6 +1736,7 @@
     if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
     if (attacker.unitId === 'injection_fairy_lily' && attacker.hp / attacker.maxHp < 0.5) mult *= 3;
     if (alliesAdjacentTo(attacker).some(a => a.unitId === 'time_wizard')) mult *= Math.random() < 0.5 ? 2 : 0;
+    if (alliesAdjacentTo(attacker).some(a => a.unitId === 'swordsman_of_landstar' && a.wasAttackedThisTurn)) mult *= 1.3;
     if (attacker.attribute === 'DARK') mult *= ATTRIBUTE_SYNERGY.DARK[attributeSynergyTier(attacker)];
     if (attacker.attribute === 'FIRE' && defender.hp < defender.maxHp) mult *= ATTRIBUTE_SYNERGY.FIRE[attributeSynergyTier(attacker)];
     return mult;
@@ -1743,10 +1750,12 @@
     }
     // Mountain terrain: flat defensive reduction for whoever's standing on it,
     // independent of the summoned_skull piercing exception above (terrain, not a
-    // unit ability). Shared with estimateDamage's AI planning path for free,
-    // since this function isn't cloned the way outgoingDamageMultiplier is.
+    // unit ability) — but Little Chimera lets its adjacent allies punch through it.
     const defenderHazard = currentHazards().find(h => h.x === defender.x && h.y === defender.y);
-    if (defenderHazard && defenderHazard.damageReductionPct != null) mult *= (1 - defenderHazard.damageReductionPct);
+    if (defenderHazard && defenderHazard.damageReductionPct != null &&
+        !alliesAdjacentTo(attacker).some(a => a.unitId === 'little_chimera')) {
+      mult *= (1 - defenderHazard.damageReductionPct);
+    }
     if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
     if (defender.attribute === 'EARTH') mult *= ATTRIBUTE_SYNERGY.EARTH[attributeSynergyTier(defender)];
     if (defender.attribute === 'WATER') {
@@ -1773,6 +1782,9 @@
   // type (pit/chasm/mountain/lava) has no slippery flag, so a first landing tile
   // on one of those returns immediately, exactly as before this loop existed.
   function knockbackDestination(attacker, defender) {
+    if (attacker.unitId === 'flame_cerebrus') return null;
+    if (defender.unitId === 'seven_colored_fish' || defender.unitId === 'chimera_the_flying_mythical_beast' ||
+        alliesAdjacentTo(defender).some(a => a.unitId === 'chimera_the_flying_mythical_beast')) return null;
     if (manhattan(attacker.x, attacker.y, defender.x, defender.y) !== 1) return null;
     const dx = defender.x - attacker.x, dy = defender.y - attacker.y;
     let dest = { x: defender.x + dx, y: defender.y + dy };
@@ -1788,7 +1800,6 @@
   }
 
   function onUnitDeath(defender, attacker) {
-    if (defender.team === 'player') playerDeaths += 1; else enemyDeaths += 1;
     if (defender.monsterType === 'Insect') {
       if (defender.team === 'player') playerInsectDeaths += 1; else enemyInsectDeaths += 1;
     }
@@ -1799,6 +1810,18 @@
     units.filter(u => u.alive && u.unitId === 'black_luster_soldier').forEach(bls => {
       bls.atk += 5;
       log(labelOf(bls) + ' grows stronger! (+5 ATK)');
+    });
+
+    // Dark Magician Girl grows from any allied death, not just her own kills —
+    // and unlike Black Luster Soldier's battle-only growth, hers is permanent:
+    // it's written to her roster entry's bonusAtk (read back by makeUnit) so it
+    // carries into every future battle instead of resetting. Enemy-side copies
+    // (no roster entry) still get the live in-battle bump, just nothing persists.
+    units.filter(u => u.alive && u.unitId === 'dark_magician_girl' && u.team === defender.team).forEach(dmgGirl => {
+      dmgGirl.atk += 2;
+      const entry = dmgGirl.rosterId != null ? findRosterEntry(dmgGirl.rosterId) : null;
+      if (entry) entry.bonusAtk = (entry.bonusAtk || 0) + 2;
+      log(labelOf(dmgGirl) + ' grows stronger, permanently! (+2 ATK)');
     });
 
     if (attacker.unitId === 'vorse_raider') {
@@ -1815,6 +1838,14 @@
         target.hp += healAmt;
         log(labelOf(defender) + "'s sacrifice heals " + labelOf(target) + ' for ' + healAmt + ' HP.');
       }
+    }
+
+    if (defender.unitId === 'watapon') {
+      alliesAdjacentTo(defender).filter(a => a.hp < a.maxHp).forEach(target => {
+        const healAmt = Math.min(10, target.maxHp - target.hp);
+        target.hp += healAmt;
+        log(labelOf(defender) + "'s fluff cushions " + labelOf(target) + ' for ' + healAmt + ' HP.');
+      });
     }
 
     if (defender.unitId === 'cyber_jar') {
@@ -1864,10 +1895,10 @@
 
   // Counterpart to onUnitDeath for a building reaching 0 HP. Deliberately does not
   // call onUnitDeath: none of its unit-only on-death abilities (sangan/cyber_jar/
-  // man_eater_bug/vorse_raider/baby_dragon/flame_swordsman) apply to a building, and
-  // routing a building through it would incorrectly increment enemyDeaths (a
-  // building isn't an enemy unit) and pollute dark_magician_girl's/insect_queen's
-  // per-death scaling counters, which are meant to count only unit deaths.
+  // man_eater_bug/vorse_raider/baby_dragon/flame_swordsman/dark_magician_girl) apply
+  // to a building, and routing a building through it would incorrectly feed Black
+  // Luster Soldier's/Dark Magician Girl's growth and insect_queen's per-death
+  // scaling counter, all of which are meant to count only unit deaths.
   // Intentionally does not increment attacker.kills — .kills is only ever read for
   // player-team XP (awardUnitXp), and only enemy attacks can destroy a building, so
   // an enemy's .kills is never read regardless; left out anyway to keep the field's
@@ -1924,6 +1955,20 @@
       }
     }
 
+    if (attacker.unitId === 'gilford_the_lightning' && !attacker.usedFirstAttack) {
+      attacker.usedFirstAttack = true;
+      const blastDmg = Math.max(1, Math.round(attacker.atk * 0.5));
+      units.filter(u => u.alive && u.team !== attacker.team && u !== defender).forEach(t => {
+        t.hp = Math.max(0, t.hp - blastDmg);
+        log(labelOf(attacker) + "'s lightning arcs to " + labelOf(t) + ' for ' + blastDmg + ' dmg!');
+        if (t.hp <= 0) {
+          t.alive = false;
+          log(labelOf(t) + ' is destroyed!');
+          onUnitDeath(t, attacker);
+        }
+      });
+    }
+
     const variance = 0.85 + Math.random() * 0.3;
     let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
     dmg *= outgoingDamageMultiplier(attacker, defender);
@@ -1955,14 +2000,19 @@
         log(labelOf(defender) + ' is destroyed!');
         onUnitDeath(defender, attacker);
       }
-    } else if (defender.unitId === 'celtic_guardian' && manhattan(attacker.x, attacker.y, defender.x, defender.y) === 1) {
-      const counterDmg = Math.max(1, Math.round(defender.atk * 0.5));
-      attacker.hp = Math.max(0, attacker.hp - counterDmg);
-      log(labelOf(defender) + ' parries, striking back for ' + counterDmg + ' dmg!');
-      if (attacker.hp <= 0) {
-        attacker.alive = false;
-        log(labelOf(attacker) + ' is destroyed!');
-        onUnitDeath(attacker, defender);
+    } else {
+      if (defender.unitId === 'celtic_guardian' && manhattan(attacker.x, attacker.y, defender.x, defender.y) === 1) {
+        const counterDmg = Math.max(1, Math.round(defender.atk * 0.5));
+        attacker.hp = Math.max(0, attacker.hp - counterDmg);
+        log(labelOf(defender) + ' parries, striking back for ' + counterDmg + ' dmg!');
+        if (attacker.hp <= 0) {
+          attacker.alive = false;
+          log(labelOf(attacker) + ' is destroyed!');
+          onUnitDeath(attacker, defender);
+        }
+      }
+      if (defender.unitId === 'swordsman_of_landstar') {
+        defender.wasAttackedThisTurn = true;
       }
     }
 
@@ -1970,6 +2020,31 @@
       const atkLoss = Math.round(defender.atk * 0.2);
       defender.atk = Math.max(0, defender.atk - atkLoss);
       log(labelOf(attacker) + " saps " + labelOf(defender) + "'s ATK! (-" + atkLoss + ' ATK)');
+    }
+
+    if (attacker.alive && alliesAdjacentTo(defender).some(a => a.unitId === 'princess_of_tsurugi')) {
+      const guardianDmg = 6;
+      attacker.hp = Math.max(0, attacker.hp - guardianDmg);
+      log("Princess of Tsurugi punishes " + labelOf(attacker) + ' for ' + guardianDmg + ' dmg!');
+      if (attacker.hp <= 0) {
+        attacker.alive = false;
+        log(labelOf(attacker) + ' is destroyed!');
+        onUnitDeath(attacker, defender);
+      }
+    }
+
+    if (attacker.unitId === 'levia_dragon_daedalus') {
+      const splashDmg = Math.max(1, Math.round(dmg * 0.1));
+      const splashTargets = units.filter(u => u.alive && u.team !== attacker.team && u !== defender && manhattan(u.x, u.y, defender.x, defender.y) === 1);
+      splashTargets.forEach(t => {
+        t.hp = Math.max(0, t.hp - splashDmg);
+        log(labelOf(attacker) + "'s tidal wave washes over " + labelOf(t) + ' for ' + splashDmg + ' dmg.');
+        if (t.hp <= 0) {
+          t.alive = false;
+          log(labelOf(t) + ' is destroyed!');
+          onUnitDeath(t, attacker);
+        }
+      });
     }
 
     // Knockback: every attack shoves its target now, as long as the defender
@@ -2160,8 +2235,12 @@
   function selectUnit(u) {
     if (u.turnDone) return;
     selectedUnit = u;
-    reachableTiles = u.hasMoved ? [] : bfsReachable(u);
-    attackableTargets = enemiesInRange(u.x, u.y, u.range, 'player');
+    // usedSkyScoutDashThisTurn caps a reopened move at 2 tiles instead of its
+    // full move stat, and blocks a fresh attackableTargets grant once attacks
+    // are already exhausted — both needed so deselecting and reselecting a
+    // mid-dash Sky Scout can't re-offer its full move or a second attack.
+    reachableTiles = u.hasMoved ? [] : bfsReachable(u, undefined, u.usedSkyScoutDashThisTurn ? 2 : undefined);
+    attackableTargets = u.attacksUsed < attacksPerTurn(u) ? enemiesInRange(u.x, u.y, u.range, 'player') : [];
     render();
   }
 
@@ -2169,6 +2248,7 @@
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
+    repositionAlly = null;
     render();
   }
 
@@ -2178,8 +2258,49 @@
     deselect();
   }
 
+  // Penguin Soldier carry mode: reachableTiles at this point holds the carried
+  // ally's own destination options (see the penguin_soldier branch in
+  // handleBoardClick below), not Penguin Soldier's — a click on a valid tile
+  // moves the ally there and spends Penguin Soldier's own turn; anything else
+  // (Penguin Soldier itself, the carried ally, an enemy, an invalid tile)
+  // cancels back to Penguin Soldier's normal selection state.
+  function carryAllyClick(tx, ty) {
+    const penguin = selectedUnit;
+    const ally = repositionAlly;
+    const target = unitAt(tx, ty);
+    if (!target && reachableTiles.some(t => t.x === tx && t.y === ty)) {
+      const fromX = ally.x, fromY = ally.y;
+      ally.x = tx;
+      ally.y = ty;
+      // Being carried can leave an ally that already finished its own turn (e.g.
+      // moved earlier with nothing in range, which auto-finalizes it same as any
+      // other unit) stuck unable to act from its new spot — reopen it so it can
+      // still be selected and attack. hasMoved/attacksUsed are untouched, so this
+      // can't grant it a second move or a second attack, only the chance to use
+      // whichever of those it hadn't used yet.
+      ally.turnDone = false;
+      animateMove(ally, fromX, fromY);
+      log(labelOf(penguin) + ' scoops up ' + labelOf(ally) + ' and pulls it to safety.');
+      repositionAlly = null;
+      // Carrying spends Penguin Soldier's action (like an attack would — it's
+      // "instead of attacking"), but not its own move: if it hasn't moved yet
+      // this turn, that's still independently available in either order, so
+      // only finalize here if there's genuinely nothing left for it to do.
+      penguin.attacksUsed = attacksPerTurn(penguin);
+      if (penguin.hasMoved) {
+        finalize(penguin);
+      } else {
+        deselect();
+      }
+      return;
+    }
+    repositionAlly = null;
+    selectUnit(penguin);
+  }
+
   function handleBoardClick(tx, ty) {
     if (gameOver || currentTurn !== 'player' || aiRunning) return;
+    if (repositionAlly) { carryAllyClick(tx, ty); return; }
     const target = unitAt(tx, ty);
 
     if (!selectedUnit) {
@@ -2188,7 +2309,11 @@
     }
 
     if (target === selectedUnit) {
-      if (!selectedUnit.hasMoved) {
+      // usedSkyScoutDashThisTurn is only ever true while hasMoved has been
+      // deliberately reset to false for its post-attack bonus move (see the
+      // sky_scout branch below) — a plain not-yet-moved unit never has it set,
+      // so this can't misfire for anyone else.
+      if (!selectedUnit.hasMoved && !selectedUnit.usedSkyScoutDashThisTurn) {
         deselect();
       } else {
         log(labelOf(selectedUnit) + ' holds position.');
@@ -2207,12 +2332,38 @@
         const targetsLeft = attacker.alive ? enemiesInRange(attacker.x, attacker.y, attacker.range, 'player') : [];
         if (attacker.alive && attacker.attacksUsed < attacksPerTurn(attacker) && targetsLeft.length > 0) {
           attackableTargets = targetsLeft;
+        } else if (attacker.alive && attacker.unitId === 'sky_scout' && !attacker.usedSkyScoutDashThisTurn) {
+          attacker.usedSkyScoutDashThisTurn = true;
+          attacker.hasMoved = false;
+          reachableTiles = bfsReachable(attacker, undefined, 2);
+          attackableTargets = [];
+          log(labelOf(attacker) + ' darts back into position.');
         } else if (attacker.alive) {
           finalize(attacker);
         } else {
           deselect();
         }
       }
+      render();
+      return;
+    }
+
+    // Penguin Soldier: instead of selecting an adjacent ally (the normal
+    // click-a-friendly-unit behavior below), clicking one enters carry mode —
+    // an alternate action that repositions the ally without touching the
+    // ally's own hasMoved/turnDone/movedThisTurn, in place of Penguin
+    // Soldier's attack. Gated on attacksUsed (not hasMoved/turnDone) so it's
+    // available in either order relative to Penguin Soldier's own move — using
+    // one doesn't block the other — but only once, same as a normal attack;
+    // available regardless of the ally's own turnDone state too (the ally's
+    // turn economy is untouched either way).
+    if (selectedUnit.unitId === 'penguin_soldier' && !selectedUnit.turnDone &&
+        selectedUnit.attacksUsed < attacksPerTurn(selectedUnit) &&
+        target && target.team === 'player' && target !== selectedUnit &&
+        manhattan(selectedUnit.x, selectedUnit.y, target.x, target.y) === 1) {
+      repositionAlly = target;
+      reachableTiles = bfsReachable(target, undefined, selectedUnit.move);
+      attackableTargets = [];
       render();
       return;
     }
@@ -2229,9 +2380,23 @@
       selectedUnit.hasMoved = true;
       selectedUnit.movedThisTurn = true;
       reachableTiles = [];
-      attackableTargets = enemiesInRange(tx, ty, selectedUnit.range, 'player');
+      // Gated on attacksUsed so a Penguin Soldier that already spent its action
+      // via carry (before this move) can't also pick up a bogus attack option
+      // here — enemiesInRange alone doesn't know its action is already spent.
+      attackableTargets = selectedUnit.attacksUsed < attacksPerTurn(selectedUnit)
+        ? enemiesInRange(tx, ty, selectedUnit.range, 'player') : [];
       animateMove(selectedUnit, fromX, fromY);
-      if (attackableTargets.length === 0) {
+      // Penguin Soldier's carry action doesn't show up in attackableTargets (it
+      // targets an adjacent ally, not an enemy) and the ally it'll want to carry
+      // may not even be adjacent yet — it could move into place afterward, as its
+      // own separate action. So a bare "no attack targets" can't tell us Penguin
+      // Soldier is actually done: leave it selected-but-not-finalized after moving
+      // as long as its action (attack or carry) is still unspent, and let an
+      // explicit action (self-click to hold position, attacking, or carrying)
+      // end its turn instead.
+      const actionAvailable = selectedUnit.attacksUsed < attacksPerTurn(selectedUnit) &&
+        (attackableTargets.length > 0 || selectedUnit.unitId === 'penguin_soldier');
+      if (!actionAvailable) {
         finalize(selectedUnit);
       } else {
         render();
@@ -2333,6 +2498,7 @@
     if (attacker.unitId === 'feral_imp' && defender.hp / defender.maxHp < 0.5) mult *= 1.4;
     if (attacker.unitId === 'blue_eyes_white_dragon' && defender.hp < defender.maxHp) mult *= 1.3;
     if (attacker.unitId === 'injection_fairy_lily' && attacker.hp / attacker.maxHp < 0.5) mult *= 3;
+    if (alliesAdjacentTo(attacker).some(a => a.unitId === 'swordsman_of_landstar' && a.wasAttackedThisTurn)) mult *= 1.3;
     if (attacker.attribute === 'DARK') mult *= ATTRIBUTE_SYNERGY.DARK[attributeSynergyTier(attacker)];
     if (attacker.attribute === 'FIRE' && defender.hp < defender.maxHp) mult *= ATTRIBUTE_SYNERGY.FIRE[attributeSynergyTier(attacker)];
     return mult;
@@ -2350,7 +2516,10 @@
       if (defender.unitId === 'beaver_warrior' && !defender.movedThisTurn) mult *= 0.7;
     }
     const defenderHazard = currentHazards().find(h => h.x === defender.x && h.y === defender.y);
-    if (defenderHazard && defenderHazard.damageReductionPct != null) mult *= (1 - defenderHazard.damageReductionPct);
+    if (defenderHazard && defenderHazard.damageReductionPct != null &&
+        !alliesAdjacentTo(attacker).some(a => a.unitId === 'little_chimera')) {
+      mult *= (1 - defenderHazard.damageReductionPct);
+    }
     if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
     if (defender.attribute === 'EARTH') mult *= ATTRIBUTE_SYNERGY.EARTH[attributeSynergyTier(defender)];
     if (defender.attribute === 'WATER') mult *= (1 - ATTRIBUTE_SYNERGY.WATER[attributeSynergyTier(defender)]);
@@ -2835,6 +3004,8 @@
       u.turnDone = false;
       u.movedThisTurn = false;
       u.attacksUsed = 0;
+      u.wasAttackedThisTurn = false;
+      u.usedSkyScoutDashThisTurn = false;
     });
     applyTurnStartEffects('enemy');
     render();
@@ -2962,6 +3133,8 @@
       u.turnDone = false;
       u.movedThisTurn = false;
       u.attacksUsed = 0;
+      u.wasAttackedThisTurn = false;
+      u.usedSkyScoutDashThisTurn = false;
     });
     applyTurnStartEffects('player');
     if (checkGameOver()) return;
@@ -3033,7 +3206,14 @@
     units.filter(u => u.alive && u.team === team).forEach(u => {
       const hazard = currentHazards().find(h => h.x === u.x && h.y === u.y);
       if (!hazard || hazard.damageOverTime == null) return;
-      const dmg = hazard.damageOverTime;
+      // Flame Manipulator shrugs off lava itself (and shields nothing else from
+      // it — the doubling below only ever hits its actual enemies), while
+      // Chimera the Flying Mythical Beast flies above lava entirely, for itself
+      // and any ally standing next to it.
+      if (u.unitId === 'flame_manipulator' || u.unitId === 'chimera_the_flying_mythical_beast' ||
+          alliesAdjacentTo(u).some(a => a.unitId === 'chimera_the_flying_mythical_beast')) return;
+      let dmg = hazard.damageOverTime;
+      if (units.some(fm => fm.alive && fm.team !== u.team && fm.unitId === 'flame_manipulator')) dmg *= 2;
       u.hp = Math.max(0, u.hp - dmg);
       log(labelOf(u) + ' is scorched by lava for ' + dmg + ' dmg.');
       if (u.hp <= 0) {
@@ -3615,13 +3795,12 @@
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
+    repositionAlly = null;
     hoveredTile = null;
     enemyPlan = [];
     battleLogEl.innerHTML = '';
     bannerEl.classList.remove('show', 'victory', 'defeat');
     endTurnBtn.disabled = false;
-    playerDeaths = 0;
-    enemyDeaths = 0;
     playerInsectDeaths = 0;
     enemyInsectDeaths = 0;
 
@@ -3858,7 +4037,9 @@
 
   let nextRosterId = 1;
   function makeRosterEntry(unitId) {
-    return { rosterId: nextRosterId++, unitId, level: 1, xp: 0 };
+    // bonusAtk: permanent ATK earned via dark_magician_girl's per-ally-death
+    // growth (see makeUnit) — 0 and unused for every other unit.
+    return { rosterId: nextRosterId++, unitId, level: 1, xp: 0, bonusAtk: 0 };
   }
 
   let activeRoster = [];
@@ -4438,6 +4619,7 @@
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
+    repositionAlly = null;
     hoveredTile = null;
 
     placeAITeam(confirmedAiTeam);
