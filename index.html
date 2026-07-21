@@ -1035,6 +1035,18 @@
     jinzo: '#b91c1c',
     insect_queen: '#65a30d',
     barrel_dragon: '#374151',
+    agido: '#a8a29e',
+    amphibian_beast: '#0d9488',
+    great_angus: '#b91c1c',
+    harpie_lady_sisters: '#fb7185',
+    hinotama_soul: '#ea580c',
+    horus_the_black_flame_dragon_lv6: '#1c1917',
+    molten_zombie: '#c2410c',
+    petit_moth: '#a3e635',
+    skelengel: '#fef3c7',
+    skull_red_bird: '#7f1d1d',
+    the_legendary_fisherman: '#0369a1',
+    white_dolphin: '#7dd3fc',
   };
 
   const TEAM_STROKE = { player: '#3b82f6', enemy: '#ef4444' };
@@ -1472,6 +1484,14 @@
   // clicks through carryAllyClick instead of the normal flow until this clears.
   let repositionAlly = null;
 
+  // Horus the Black Flame Dragon LV6's sacrifice ability: while set (to the
+  // Horus unit itself), handleBoardClick routes through sacrificeClick instead
+  // of the normal flow, and draw() highlights every living enemy on the board
+  // — not just attackableTargets — as a valid target, same "armed mode" shape
+  // as repositionAlly above but for an enemy instead of an ally, and with no
+  // move sub-step since the effect is instant.
+  let armedAbility = null;
+
   let playerInsectDeaths = 0;
   let enemyInsectDeaths = 0;
 
@@ -1500,6 +1520,7 @@
       movedThisTurn: false, attacksUsed: 0, usedSacrifice: false, kills: 0,
       usedSurvive: false, usedRevive: false, usedFirstAttack: false,
       wasAttackedThisTurn: false, usedSkyScoutDashThisTurn: false,
+      usedDetonate: false, agidoBuffAmount: 0,
       targetBuilding: null,
       // Render-state only — decoupled from the logical fields above so combat
       // stays instant/authoritative while draw() eases these toward it.
@@ -1638,7 +1659,11 @@
         if (buildingAt(tx, ty)) break;
         const blocker = unitAt(tx, ty);
         if (blocker) {
-          if (blocker.team !== team) result.push(blocker);
+          // The Legendary Fisherman can't be targeted by anything but an
+          // adjacent (melee-range) attacker — still blocks the line for
+          // whatever's behind it, same as any other unit standing here.
+          const untargetable = blocker.unitId === 'the_legendary_fisherman' && dist > 1;
+          if (blocker.team !== team && !untargetable) result.push(blocker);
           break;
         }
       }
@@ -1726,6 +1751,14 @@
       bonus += 3 * (attacker.team === 'player' ? playerInsectDeaths : enemyInsectDeaths);
     }
 
+    if (alliesAdjacentTo(attacker).some(a => a.unitId === 'harpie_lady_sisters')) {
+      bonus += attacker.attribute === 'WIND' ? 5 : 2;
+    }
+
+    if (attacker.agidoBuffAmount) {
+      bonus += attacker.agidoBuffAmount;
+    }
+
     return bonus;
   }
 
@@ -1761,6 +1794,10 @@
     if (defender.attribute === 'WATER') {
       const dodgeChance = ATTRIBUTE_SYNERGY.WATER[attributeSynergyTier(defender)];
       if (Math.random() < dodgeChance) mult *= 0;
+    }
+    if (defender.unitId === 'white_dolphin' && Math.random() < 0.25) mult *= 0;
+    if (defender.unitId === 'amphibian_beast' && (attacker.monsterType === 'Aqua' || attacker.monsterType === 'Fish')) {
+      mult *= 0.5;
     }
     return mult;
   }
@@ -1829,6 +1866,14 @@
       attacker.atk += gain;
       log(labelOf(attacker) + ' grows stronger! (+' + gain + ' ATK)');
     }
+
+    // Skull Red Bird scavenges off of any death next to it, ally or enemy —
+    // unlike vorse_raider above, it doesn't need to be the one landing the kill.
+    units.filter(u => u.alive && u.unitId === 'skull_red_bird' && manhattan(u.x, u.y, defender.x, defender.y) === 1)
+      .forEach(u => {
+        u.atk += 3;
+        log(labelOf(u) + ' grows stronger! (+3 ATK)');
+      });
 
     if (defender.unitId === 'sangan') {
       const target = units.filter(u => u.alive && u.team === defender.team && u.hp < u.maxHp)
@@ -1973,6 +2018,10 @@
     let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
     dmg *= outgoingDamageMultiplier(attacker, defender);
     dmg *= incomingDamageMultiplier(attacker, defender);
+    if (attacker.unitId === 'great_angus' && !attacker.usedFirstAttack) {
+      attacker.usedFirstAttack = true;
+      dmg *= 1.3;
+    }
     dmg = Math.max(1, Math.round(dmg));
 
     if (defender.unitId === 'kuriboh' && !defender.usedSacrifice) {
@@ -1990,11 +2039,38 @@
       log(labelOf(attacker) + ' hits ' + labelOf(defender) + ' for ' + dmg + ' dmg.');
     }
 
+    if (defender.unitId === 'amphibian_beast' && attacker.alive &&
+        (attacker.monsterType === 'Aqua' || attacker.monsterType === 'Fish')) {
+      const reflectDmg = Math.max(1, Math.round(dmg * 0.2));
+      attacker.hp = Math.max(0, attacker.hp - reflectDmg);
+      log(labelOf(defender) + ' reflects ' + reflectDmg + ' dmg back at ' + labelOf(attacker) + '!');
+      if (attacker.hp <= 0) {
+        attacker.alive = false;
+        log(labelOf(attacker) + ' is destroyed!');
+        onUnitDeath(attacker, defender);
+      }
+    }
+
     if (defender.hp <= 0) {
       if (defender.unitId === 'dragon_zombie' && !defender.usedRevive) {
         defender.usedRevive = true;
         defender.hp = Math.round(defender.maxHp / 2);
         log(labelOf(defender) + ' claws its way back from the grave with ' + defender.hp + ' HP!');
+      } else if (defender.unitId === 'molten_zombie' && !defender.usedRevive) {
+        defender.usedRevive = true;
+        defender.hp = Math.round(defender.maxHp / 2);
+        log(labelOf(defender) + ' rises from its own ashes with ' + defender.hp + ' HP!');
+        const burnDmg = 10;
+        units.filter(u => u.alive && u.team !== defender.team && manhattan(u.x, u.y, defender.x, defender.y) === 1)
+          .forEach(t => {
+            t.hp = Math.max(0, t.hp - burnDmg);
+            log(labelOf(defender) + "'s flames scorch " + labelOf(t) + ' for ' + burnDmg + ' dmg!');
+            if (t.hp <= 0) {
+              t.alive = false;
+              log(labelOf(t) + ' is destroyed!');
+              onUnitDeath(t, defender);
+            }
+          });
       } else {
         defender.alive = false;
         log(labelOf(defender) + ' is destroyed!');
@@ -2194,6 +2270,7 @@
     selectedUnit = null;
     reachableTiles = [];
     attackableTargets = [];
+    armedAbility = null;
 
     bannerEl.classList.add('show');
     bannerEl.classList.toggle('victory', victory);
@@ -2249,6 +2326,7 @@
     reachableTiles = [];
     attackableTargets = [];
     repositionAlly = null;
+    armedAbility = null;
     render();
   }
 
@@ -2298,9 +2376,82 @@
     selectUnit(penguin);
   }
 
+  // Arms Horus's board-wide sacrifice (see armedAbility above): draw() starts
+  // highlighting every living enemy as a valid target until the next board
+  // click either resolves it (sacrificeClick) or cancels back to plain
+  // selection.
+  function armSacrifice() {
+    armedAbility = selectedUnit;
+    render();
+  }
+
+  // Mirrors carryAllyClick's shape one level up: any click while armed is
+  // fully consumed, either resolving the ability against a valid enemy target
+  // anywhere on the board or canceling back to Horus's normal selection state.
+  async function sacrificeClick(tx, ty) {
+    const horus = selectedUnit;
+    const target = unitAt(tx, ty);
+    armedAbility = null;
+    if (!target || target.team === horus.team) {
+      selectUnit(horus);
+      return;
+    }
+    render();
+    await resolveSacrifice(horus, target);
+    if (checkGameOver()) return;
+    deselect();
+  }
+
+  async function resolveSacrifice(horus, target) {
+    log(labelOf(horus) + ' unleashes its black flame, obliterating ' + labelOf(target) + '!');
+    target.alive = false;
+    await animateDeath(target);
+    onUnitDeath(target, horus);
+    // A retaliation-style effect on the target's own death chain (Man-Eater
+    // Bug's trap, most notably) can already have taken Horus out via the
+    // onUnitDeath call above — don't double-process its death if so.
+    if (!horus.alive) return;
+    log(labelOf(horus) + ' burns away, spent.');
+    horus.usedSacrifice = true;
+    horus.alive = false;
+    await animateDeath(horus);
+    onUnitDeath(horus, horus);
+  }
+
+  // Hinotama Soul's detonate: same flat-AoE-then-self-destruct shape as Cyber
+  // Jar's on-death blast (see onUnitDeath), just player-triggered instead of
+  // triggered by dying — secondary kills from the blast vanish instantly with
+  // no fade, matching that same precedent; only Hinotama Soul's own death (the
+  // primary, deliberate one) gets the fade animation.
+  async function resolveDetonate(u) {
+    u.usedDetonate = true;
+    u.attacksUsed = attacksPerTurn(u);
+    const targets = units.filter(t => t.alive && t.team !== u.team && manhattan(t.x, t.y, u.x, u.y) === 1);
+    log(labelOf(u) + ' detonates!');
+    const dmg = 15;
+    targets.forEach(t => {
+      t.hp = Math.max(0, t.hp - dmg);
+      log(labelOf(u) + "'s blast hits " + labelOf(t) + ' for ' + dmg + ' dmg.');
+      if (t.hp <= 0) {
+        t.alive = false;
+        log(labelOf(t) + ' is destroyed!');
+        onUnitDeath(t, u);
+      }
+    });
+    if (u.alive) {
+      u.alive = false;
+      await animateDeath(u);
+      onUnitDeath(u, u);
+    }
+    render();
+    if (checkGameOver()) return;
+    deselect();
+  }
+
   function handleBoardClick(tx, ty) {
     if (gameOver || currentTurn !== 'player' || aiRunning) return;
     if (repositionAlly) { carryAllyClick(tx, ty); return; }
+    if (armedAbility) { sacrificeClick(tx, ty); return; }
     const target = unitAt(tx, ty);
 
     if (!selectedUnit) {
@@ -2523,6 +2674,10 @@
     if (defender.unitId === 'blue_eyes_white_dragon' && attacker.monsterType === 'Spellcaster') mult *= 2;
     if (defender.attribute === 'EARTH') mult *= ATTRIBUTE_SYNERGY.EARTH[attributeSynergyTier(defender)];
     if (defender.attribute === 'WATER') mult *= (1 - ATTRIBUTE_SYNERGY.WATER[attributeSynergyTier(defender)]);
+    if (defender.unitId === 'white_dolphin') mult *= 0.75;
+    if (defender.unitId === 'amphibian_beast' && (attacker.monsterType === 'Aqua' || attacker.monsterType === 'Fish')) {
+      mult *= 0.5;
+    }
     return mult;
   }
 
@@ -3174,6 +3329,31 @@
       }
     });
 
+    // Petit Moth grows on a fixed 3-round cadence, same predictable-cadence
+    // convention as Chaos Emperor Dragon's 5-round shockwave below.
+    if (round % 3 === 0) {
+      units.filter(u => u.alive && u.team === team && u.unitId === 'petit_moth').forEach(u => {
+        u.atk += 1;
+        u.maxHp += 5;
+        u.hp += 5;
+        log(labelOf(u) + ' molts and grows stronger! (+1 ATK, +5 HP)');
+      });
+    }
+
+    // Agido's buff is only ever meant to be live for one team turn at a time —
+    // clear last turn's recipient up front (once, not per-Agido) so multiple
+    // Agidos on the same team can't clobber each other's freshly-rolled target
+    // below, then have every living Agido on this team roll a fresh one.
+    units.filter(u => u.team === team && u.agidoBuffAmount).forEach(u => { u.agidoBuffAmount = 0; });
+    units.filter(u => u.alive && u.team === team && u.unitId === 'agido').forEach(u => {
+      const candidates = units.filter(t => t.alive && t.team === team && t !== u);
+      if (candidates.length === 0) return;
+      const target = candidates[Math.floor(Math.random() * candidates.length)];
+      const amount = 5 + Math.floor(Math.random() * 16); // 5-20 inclusive
+      target.agidoBuffAmount = amount;
+      log(labelOf(u) + "'s dice roll empowers " + labelOf(target) + ' (+' + amount + ' ATK this turn)!');
+    });
+
     units.filter(u => u.alive && u.team === team && u.attribute === 'LIGHT').forEach(u => {
       const pct = ATTRIBUTE_SYNERGY.LIGHT[attributeSynergyTier(u)];
       if (pct === 0) return;
@@ -3450,6 +3630,32 @@
     });
   }
 
+  // Agido's buffed-ally ring, same late "on top of sprites/HP bars" layer as
+  // drawObjectiveUnitMarkers — a solid ring (vs. that marker's dashed one) plus
+  // the live bonus amount, so the current recipient reads at a glance without
+  // having to select it and open the unit-info panel.
+  function drawAgidoBuffMarkers() {
+    units.filter(u => u.alive && u.agidoBuffAmount > 0).forEach(u => {
+      const cx = u.x * TILE + TILE / 2;
+      const cy = u.y * TILE + TILE / 2;
+      ctx.save();
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#4ade80';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('+' + u.agidoBuffAmount, cx, u.y * TILE + TILE - 6);
+      ctx.restore();
+    });
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -3469,7 +3675,18 @@
 
     if (phase === 'battle' || phase === 'placement') { drawHazardTileMarkers(); drawBuildingTileMarkers(); }
 
-    if (selectedUnit && !gameOver) {
+    if (selectedUnit && !gameOver && armedAbility) {
+      // Sacrifice targeting mode: every living enemy is a valid target
+      // regardless of range, drawn with a dashed purple outline so it reads
+      // as something other than a normal in-range attack (solid red below).
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 3]);
+      units.filter(u => u.alive && u.team !== armedAbility.team).forEach(u => {
+        ctx.strokeRect(u.x * TILE + 2, u.y * TILE + 2, TILE - 4, TILE - 4);
+      });
+      ctx.setLineDash([]);
+    } else if (selectedUnit && !gameOver) {
       ctx.fillStyle = 'rgba(74, 158, 255, 0.35)';
       reachableTiles.forEach(t => {
         if (t.x === selectedUnit.x && t.y === selectedUnit.y) return;
@@ -3526,6 +3743,7 @@
     });
 
     drawObjectiveUnitMarkers();
+    drawAgidoBuffMarkers();
     drawFloatingTexts();
   }
 
@@ -3710,8 +3928,35 @@
       '<div class="stat-row"><span>MOVE</span><span>' + effectiveMove(u) + '</span></div>' +
       '<div class="stat-row"><span>RANGE</span><span>' + u.range + '</span></div>' +
       '<div class="unit-effect">' + UNIT_DATABASE[u.unitId].effect + '</div>' +
-      (u.isPriorityTarget ? '<div class="unit-effect" style="color:#facc15;">PRIORITY TARGET — destroying this unit wins the mission instantly.</div>' : '')
+      (u.isPriorityTarget ? '<div class="unit-effect" style="color:#facc15;">PRIORITY TARGET — destroying this unit wins the mission instantly.</div>' : '') +
+      abilityButtonHtml(u)
     );
+  }
+
+  // Special player-activated abilities beyond a plain move/attack — currently
+  // just Horus's board-wide sacrifice and Hinotama Soul's detonate. Gated on
+  // the unit actually being the live, actionable selection (not just hovered,
+  // and not mid-animation on the enemy's turn) so the button never appears for
+  // a unit the player can't actually act with right now. #unit-info has a
+  // fixed height (see CSS) with room to spare, so this never grows the panel.
+  function abilityButtonHtml(u) {
+    if (phase !== 'battle' || u !== selectedUnit || u.team !== 'player' ||
+        currentTurn !== 'player' || gameOver || u.turnDone) {
+      return '';
+    }
+
+    if (u.unitId === 'horus_the_black_flame_dragon_lv6' && !u.usedSacrifice) {
+      return '<div class="btn-row" style="margin-top:6px;">' +
+        '<button class="ability-btn" data-ability="sacrifice">SACRIFICE</button></div>';
+    }
+
+    if (u.unitId === 'hinotama_soul' && u.attacksUsed < attacksPerTurn(u) &&
+        units.some(t => t.alive && t.team !== u.team && manhattan(t.x, t.y, u.x, u.y) === 1)) {
+      return '<div class="btn-row" style="margin-top:6px;">' +
+        '<button class="ability-btn" data-ability="detonate">DETONATE</button></div>';
+    }
+
+    return '';
   }
 
   function updateUnitInfo() {
@@ -3756,6 +4001,17 @@
   canvas.addEventListener('mouseleave', () => {
     hoveredTile = null;
     if (!selectedUnit) updateUnitInfo();
+  });
+
+  // Delegated (not per-button) the same way squadRosterEl/unitGridEl etc. bind
+  // their dynamically-rendered buttons below — updateUnitInfo replaces
+  // #unit-info's innerHTML on every render, so a direct listener on the button
+  // itself would be destroyed the instant it's clicked.
+  unitInfoEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.ability-btn');
+    if (!btn || !selectedUnit || gameOver || currentTurn !== 'player' || aiRunning) return;
+    if (btn.dataset.ability === 'sacrifice') armSacrifice();
+    else if (btn.dataset.ability === 'detonate') resolveDetonate(selectedUnit);
   });
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
@@ -4762,6 +5018,17 @@
 
     battleLogEl.innerHTML = '';
     log('Battle begins! ' + objectiveDescription(obj || { type: 'kill_all' }, currentNode.boss));
+
+    units.filter(u => u.alive && u.unitId === 'skelengel').forEach(u => {
+      units.filter(t => t.alive && t.team === u.team).forEach(target => {
+        const healAmt = Math.min(5, target.maxHp - target.hp);
+        if (healAmt > 0) {
+          target.hp += healAmt;
+          log(labelOf(target) + ' is blessed by ' + labelOf(u) + ' for ' + healAmt + ' HP.');
+        }
+      });
+    });
+
     enemyPlan = planEnemyTurn();
     render();
   }
