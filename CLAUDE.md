@@ -20,3 +20,9 @@ Every unit in `UNIT_DATABASE` must have a matching sprite at `assets/sprites/<un
    ```
 3. Don't download or keep the full (non-cropped) card image — only the cropped artwork is used anywhere in the game; unused files shouldn't be added.
 4. This is for personal/local use only — the fetched art is Konami's copyrighted card art. Don't publish, distribute, or bundle this project (including `assets/sprites/`) anywhere it'd be shared beyond the user's own machine.
+
+## items-db.js conventions
+
+1. **Item `cost` is a hand-tuned star-chip shop price**, not a Duel Monsters Level/Star rating — Spell/Trap cards have no Level/Star, so the `units-db.js` cost convention doesn't apply here.
+2. **Items must be listed in alphabetical order by name**, same convention as `units-db.js`.
+3. Every item must have a matching sprite at `assets/items/<item_id>.jpg` (see `itemSpritePath()` in `index.html`), fetched the same way unit sprites are (see steps above) — the YGOPRODeck API works for Spell/Trap cards by name too, not just Monsters.

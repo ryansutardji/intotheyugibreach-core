@@ -285,7 +285,8 @@
   #map-screen,
   #draft-screen,
   #recruit-screen,
-  #squad-screen {
+  #squad-screen,
+  #item-shop-screen {
     width: 640px;
     display: flex;
     flex-direction: column;
@@ -305,6 +306,7 @@
   #draft-screen.hidden,
   #recruit-screen.hidden,
   #squad-screen.hidden,
+  #item-shop-screen.hidden,
   .game-container.hidden { display: none; }
 
   #title-screen .subtitle,
@@ -471,6 +473,12 @@
     font-size: 10px;
     color: #8bac0f;
     margin: 4px 0;
+  }
+
+  .item-badge {
+    border-top: 1px dotted #44445a;
+    padding-top: 4px;
+    color: #f0e68c;
   }
 
   .unit-card-stats {
@@ -790,6 +798,7 @@
     <button id="deploy-btn" class="primary">DEPLOY</button>
     <button id="manage-squad-btn">MANAGE SQUAD</button>
     <button id="recruit-btn">RECRUIT</button>
+    <button id="item-shop-btn">ITEMS</button>
   </div>
   <div class="btn-row">
     <button id="abandon-run-btn" class="danger">ABANDON RUN</button>
@@ -847,10 +856,23 @@
     <div id="squad-roster"></div>
     <div class="roster-label">BENCH</div>
     <div id="squad-bench"></div>
+    <div class="roster-label">ITEMS — SELECT ONE, THEN A UNIT, TO EQUIP</div>
+    <div id="squad-items"></div>
   </div>
   <div class="btn-row">
     <button id="squad-back-btn">BACK TO BASE</button>
     <button id="increase-cap-btn">INCREASE BUDGET CAP</button>
+  </div>
+</div>
+
+<div id="item-shop-screen" class="hidden">
+  <h1 class="title">ITEM SHOP</h1>
+  <div class="panel">
+    <div class="subtitle">STAR CHIPS: <span id="item-shop-star-chips-count">0</span></div>
+    <div class="unit-grid" id="item-shop-grid"></div>
+  </div>
+  <div class="btn-row">
+    <button id="item-shop-back-btn">BACK TO BASE</button>
   </div>
 </div>
 
@@ -995,6 +1017,7 @@
 </div>
 
 <script src="units-db.js"></script>
+<script src="items-db.js"></script>
 <script>
 (function () {
   'use strict';
@@ -1120,6 +1143,13 @@
     spriteImages[id] = img;
   });
 
+  // Item art — plain <img> tags in the Item Shop / Manage Squad screens only,
+  // never drawn on the battle canvas, so unlike spriteImages above this needs
+  // no preload cache or render() callback.
+  function itemSpritePath(itemId) {
+    return 'assets/items/' + itemId + '.jpg';
+  }
+
   // Hazard tile art — keyed by hazard `type`, not a unit id, so it lives in its own
   // assets/hazards/ folder rather than assets/sprites/ (see spriteImages above).
   // Same preload-and-fall-back-to-flat-color pattern as unit sprites, used by
@@ -1166,6 +1196,7 @@
   const draftScreenEl = document.getElementById('draft-screen');
   const recruitScreenEl = document.getElementById('recruit-screen');
   const squadScreenEl = document.getElementById('squad-screen');
+  const itemShopScreenEl = document.getElementById('item-shop-screen');
   const gameContainerEl = document.querySelector('.game-container');
   const unitDbBtn = document.getElementById('unit-db-btn');
   const unitDbOverlayEl = document.getElementById('unit-db-overlay');
@@ -1200,7 +1231,12 @@
   const squadBudgetCapEl = document.getElementById('squad-budget-cap');
   const squadRosterEl = document.getElementById('squad-roster');
   const squadBenchEl = document.getElementById('squad-bench');
+  const squadItemsEl = document.getElementById('squad-items');
   const increaseCapBtn = document.getElementById('increase-cap-btn');
+  const itemShopBtn = document.getElementById('item-shop-btn');
+  const itemShopBackBtn = document.getElementById('item-shop-back-btn');
+  const itemShopGridEl = document.getElementById('item-shop-grid');
+  const itemShopStarChipsEl = document.getElementById('item-shop-star-chips-count');
   const mapCanvasEl = document.getElementById('map-canvas');
   const turnPanelEl = document.getElementById('turn-panel');
   const battleLogPanelEl = document.getElementById('battle-log-panel');
@@ -1491,6 +1527,17 @@
   // as repositionAlly above but for an enemy instead of an ally, and with no
   // move sub-step since the effect is instant.
   let armedAbility = null;
+  // Which kind of armed ability is pending — lets a second, differently-shaped
+  // armed ability (Time Seal, adjacency-restricted) coexist with Horus's
+  // board-wide sacrifice above without them being confused for one another.
+  let armedAbilityKind = null; // 'sacrifice' | 'time_seal'
+
+  // Negate Attack / Waboku: set by the player activating their ability button
+  // on their own turn (see resolveNegateAttack/resolveWaboku), read inside
+  // applyAttackDamage, and cleared at the start of the following player turn
+  // — so each blocks exactly one enemy turn's worth of damage.
+  let blockUnitDamageThisTurn = false;
+  let blockBuildingDamageThisTurn = false;
 
   let playerInsectDeaths = 0;
   let enemyInsectDeaths = 0;
@@ -1512,6 +1559,7 @@
     // so this is always 0 for them.
     const rosterEntry = rosterId != null ? findRosterEntry(rosterId) : null;
     const bonusAtk = rosterEntry ? (rosterEntry.bonusAtk || 0) : 0;
+    const equippedItemId = rosterEntry ? (rosterEntry.equippedItemId || null) : null;
     return {
       id: nextId++, team, unitId, rosterId, x, y,
       name: t.name, cost: t.cost, monsterType: t.type, attribute: t.attribute,
@@ -1521,6 +1569,12 @@
       usedSurvive: false, usedRevive: false, usedFirstAttack: false,
       wasAttackedThisTurn: false, usedSkyScoutDashThisTurn: false,
       usedDetonate: false, agidoBuffAmount: 0,
+      // Equipped Magic/Trap item (see ITEM_DATABASE) — null if none. skipTurn/
+      // usedTimeSeal/usedNegateAttack/usedWaboku are all "once per mission"
+      // flags for free, since they reset on every makeUnit() call same as
+      // usedSacrifice/usedRevive above.
+      equippedItemId, skipTurn: false, usedTimeSeal: false,
+      usedNegateAttack: false, usedWaboku: false,
       targetBuilding: null,
       // Render-state only — decoupled from the logical fields above so combat
       // stays instant/authoritative while draw() eases these toward it.
@@ -1728,6 +1782,10 @@
     return (unit.unitId === 'gemini_elf' || unit.unitId === 'flame_cerebrus') ? 2 : 1;
   }
 
+  // ---------- Item effect tuning ----------
+  const UNITED_WE_STAND_ATK_PER_ALLY = 3;
+  const SOLEMN_WISHES_BONUS_CHIPS = 2;
+
   function outgoingDamageBonusFlat(attacker) {
     let bonus = 0;
 
@@ -1757,6 +1815,10 @@
 
     if (attacker.agidoBuffAmount) {
       bonus += attacker.agidoBuffAmount;
+    }
+
+    if (attacker.equippedItemId === 'united_we_stand') {
+      bonus += UNITED_WE_STAND_ATK_PER_ALLY * alliesAdjacentTo(attacker).length;
     }
 
     return bonus;
@@ -1961,6 +2023,11 @@
     if (defender.type === 'building') {
       if (defender.hp <= 0) return 0;
 
+      if (blockBuildingDamageThisTurn) {
+        log("Waboku blocks the damage to the building!");
+        return 0;
+      }
+
       const variance = 0.85 + Math.random() * 0.3;
       let dmg = attacker.atk * variance + outgoingDamageBonusFlat(attacker);
       dmg *= outgoingDamageMultiplier(attacker, defender);
@@ -1978,6 +2045,11 @@
     }
 
     if (!defender.alive) return 0;
+
+    if (defender.team === 'player' && blockUnitDamageThisTurn) {
+      log('Negate Attack blocks the damage to ' + labelOf(defender) + '!');
+      return 0;
+    }
 
     if (attacker.unitId === 'reaper_of_the_cards' && defender.hp / defender.maxHp <= 0.2) {
       const prevHp = defender.hp;
@@ -2030,7 +2102,11 @@
       return 0;
     }
 
-    if (defender.unitId === 'sinister_serpent' && !defender.usedSurvive && dmg >= defender.hp) {
+    if (defender.equippedItemId === 'nutrient_z' && !defender.usedSurvive && dmg >= defender.hp) {
+      defender.usedSurvive = true;
+      defender.hp = 1;
+      log(labelOf(defender) + ' survives the hit at 1 HP, thanks to Nutrient Z!');
+    } else if (defender.unitId === 'sinister_serpent' && !defender.usedSurvive && dmg >= defender.hp) {
       defender.usedSurvive = true;
       defender.hp = 1;
       log(labelOf(attacker) + ' hits ' + labelOf(defender) + ' for ' + dmg + ' dmg, but it slithers away with 1 HP!');
@@ -2052,7 +2128,16 @@
     }
 
     if (defender.hp <= 0) {
-      if (defender.unitId === 'dragon_zombie' && !defender.usedRevive) {
+      if (defender.equippedItemId === 'monster_reborn' && !defender.usedRevive) {
+        defender.usedRevive = true;
+        defender.hp = defender.maxHp;
+        log(labelOf(defender) + ' is reborn at full strength by Monster Reborn!');
+        // Permanent — this copy of the item is spent for good and must be
+        // rebought, unlike Nutrient Z above which just resets next mission.
+        const entry = findRosterEntry(defender.rosterId);
+        if (entry) entry.equippedItemId = null;
+        defender.equippedItemId = null;
+      } else if (defender.unitId === 'dragon_zombie' && !defender.usedRevive) {
         defender.usedRevive = true;
         defender.hp = Math.round(defender.maxHp / 2);
         log(labelOf(defender) + ' claws its way back from the grave with ' + defender.hp + ' HP!');
@@ -2271,6 +2356,7 @@
     reachableTiles = [];
     attackableTargets = [];
     armedAbility = null;
+    armedAbilityKind = null;
 
     bannerEl.classList.add('show');
     bannerEl.classList.toggle('victory', victory);
@@ -2284,6 +2370,15 @@
       bannerSubEl.textContent = (victoryPrefix ? victoryPrefix + ' ' : '') + currentNode.name + ' secured.';
       starChips += currentNode.budget;
       bannerSubEl.textContent += ' +' + currentNode.budget + ' Star Chips earned.';
+      // Solemn Wishes: +2 bonus chips per surviving unit that's carrying it —
+      // reuses awardUnitXp's exact "surviving player unit" filter below.
+      const solemnCount = units.filter(u => u.team === 'player' && u.alive && u.rosterId != null
+        && u.equippedItemId === 'solemn_wishes').length;
+      if (solemnCount > 0) {
+        const solemnBonus = SOLEMN_WISHES_BONUS_CHIPS * solemnCount;
+        starChips += solemnBonus;
+        bannerSubEl.textContent += ' +' + solemnBonus + ' bonus Star Chips from Solemn Wishes.';
+      }
       currentNodeWon = true;
     } else {
       bannerTextEl.textContent = 'DEFEAT';
@@ -2327,6 +2422,7 @@
     attackableTargets = [];
     repositionAlly = null;
     armedAbility = null;
+    armedAbilityKind = null;
     render();
   }
 
@@ -2382,6 +2478,7 @@
   // selection.
   function armSacrifice() {
     armedAbility = selectedUnit;
+    armedAbilityKind = 'sacrifice';
     render();
   }
 
@@ -2392,6 +2489,7 @@
     const horus = selectedUnit;
     const target = unitAt(tx, ty);
     armedAbility = null;
+    armedAbilityKind = null;
     if (!target || target.team === horus.team) {
       selectUnit(horus);
       return;
@@ -2399,6 +2497,42 @@
     render();
     await resolveSacrifice(horus, target);
     if (checkGameOver()) return;
+    deselect();
+  }
+
+  // Time Seal: same armed-mode shape as Horus's sacrifice above, but targeting
+  // is restricted to adjacent enemies only (see draw()'s highlight branch) and
+  // the effect just freezes the target out of its next turn instead of
+  // killing anything.
+  function armTimeSeal() {
+    armedAbility = selectedUnit;
+    armedAbilityKind = 'time_seal';
+    render();
+  }
+
+  function timeSealClick(tx, ty) {
+    const caster = selectedUnit;
+    const target = unitAt(tx, ty);
+    armedAbility = null;
+    armedAbilityKind = null;
+    if (!target || target.team === caster.team || manhattan(target.x, target.y, caster.x, caster.y) !== 1) {
+      selectUnit(caster);
+      return;
+    }
+    caster.usedTimeSeal = true;
+    log(labelOf(caster) + " seals " + labelOf(target) + "'s next turn with Time Seal!");
+    // enemyPlan for the upcoming enemy turn was already locked in at the start
+    // of this player turn (see startPlayerTurn), so what actually skips the
+    // target's turn is stripping its entry here, for immediate effect —
+    // not the target.skipTurn flag, which planOneEnemyUnit only consults as a
+    // defense-in-depth guard against some future planning pass targeting this
+    // same unit before its next turn. Deliberately NOT set here: if left true
+    // it would still be true (and unconsumed) at the very next planEnemyTurn
+    // call — the start of the player's *next* turn — and wrongly skip a
+    // second, unintended turn once that guard finally reads and clears it.
+    const idx = enemyPlan.findIndex(entry => entry.unitId === target.id);
+    if (idx !== -1) enemyPlan.splice(idx, 1);
+    render();
     deselect();
   }
 
@@ -2448,10 +2582,34 @@
     deselect();
   }
 
+  // Negate Attack / Waboku: same direct-fire shape as resolveDetonate above —
+  // no board target to pick, since the shield protects the whole squad or
+  // every building rather than one unit. usedNegateAttack/usedWaboku make
+  // this a once-per-mission button; blockUnitDamageThisTurn/
+  // blockBuildingDamageThisTurn are read by applyAttackDamage and cleared at
+  // the start of the following player turn (see startPlayerTurn).
+  function resolveNegateAttack(u) {
+    u.usedNegateAttack = true;
+    blockUnitDamageThisTurn = true;
+    log(labelOf(u) + ' activates Negate Attack — all damage to your units is blocked next turn!');
+    render();
+  }
+
+  function resolveWaboku(u) {
+    u.usedWaboku = true;
+    blockBuildingDamageThisTurn = true;
+    log(labelOf(u) + ' activates Waboku — all damage to your buildings is blocked next turn!');
+    render();
+  }
+
   function handleBoardClick(tx, ty) {
     if (gameOver || currentTurn !== 'player' || aiRunning) return;
     if (repositionAlly) { carryAllyClick(tx, ty); return; }
-    if (armedAbility) { sacrificeClick(tx, ty); return; }
+    if (armedAbility) {
+      if (armedAbilityKind === 'time_seal') timeSealClick(tx, ty);
+      else sacrificeClick(tx, ty);
+      return;
+    }
     const target = unitAt(tx, ty);
 
     if (!selectedUnit) {
@@ -2905,6 +3063,12 @@
   // afterward if that commit should not be visible yet. Returns null if there's
   // no living player target to plan against.
   function planOneEnemyUnit(unit, context) {
+    // Defense-in-depth for Time Seal: the primary effect happens by directly
+    // stripping the target's plan entry in timeSealClick, for an immediate
+    // preview update. This guard only matters if something plans this same
+    // unit again before that already applies — returning falsy is the same
+    // "this unit does nothing this round" signal planEnemyTurn already reads.
+    if (unit.skipTurn) { unit.skipTurn = false; return null; }
     const alivePlayers = units.filter(u => u.team === 'player' && u.alive);
     // focusLowestHP (currently only boss units) locks onto a single target — the
     // lowest-HP living player unit — instead of gravitating toward whichever
@@ -3283,6 +3447,10 @@
   function startPlayerTurn() {
     round += 1;
     currentTurn = 'player';
+    // Negate Attack / Waboku only ever protect the one enemy turn immediately
+    // after they're activated — clear both shields now that turn is over.
+    blockUnitDamageThisTurn = false;
+    blockBuildingDamageThisTurn = false;
     units.filter(u => u.team === 'player' && u.alive).forEach(u => {
       u.hasMoved = false;
       u.turnDone = false;
@@ -3675,7 +3843,19 @@
 
     if (phase === 'battle' || phase === 'placement') { drawHazardTileMarkers(); drawBuildingTileMarkers(); }
 
-    if (selectedUnit && !gameOver && armedAbility) {
+    if (selectedUnit && !gameOver && armedAbility && armedAbilityKind === 'time_seal') {
+      // Time Seal targeting mode: only enemies directly adjacent to the
+      // caster are valid, drawn with a dashed cyan outline so it reads as a
+      // visually distinct mode from Sacrifice's board-wide purple below.
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([4, 3]);
+      units.filter(u => u.alive && u.team !== armedAbility.team
+        && manhattan(u.x, u.y, armedAbility.x, armedAbility.y) === 1).forEach(u => {
+        ctx.strokeRect(u.x * TILE + 2, u.y * TILE + 2, TILE - 4, TILE - 4);
+      });
+      ctx.setLineDash([]);
+    } else if (selectedUnit && !gameOver && armedAbility) {
       // Sacrifice targeting mode: every living enemy is a valid target
       // regardless of range, drawn with a dashed purple outline so it reads
       // as something other than a normal in-range attack (solid red below).
@@ -3945,18 +4125,36 @@
       return '';
     }
 
+    // An equipped item's ability is independent of the unit's own innate one
+    // (e.g. Horus's Sacrifice) — both buttons must be able to show together,
+    // so every condition below is collected rather than returned on first
+    // match, which would otherwise silently hide whichever came second.
+    const buttons = [];
+
     if (u.unitId === 'horus_the_black_flame_dragon_lv6' && !u.usedSacrifice) {
-      return '<div class="btn-row" style="margin-top:6px;">' +
-        '<button class="ability-btn" data-ability="sacrifice">SACRIFICE</button></div>';
+      buttons.push('<button class="ability-btn" data-ability="sacrifice">SACRIFICE</button>');
     }
 
     if (u.unitId === 'hinotama_soul' && u.attacksUsed < attacksPerTurn(u) &&
         units.some(t => t.alive && t.team !== u.team && manhattan(t.x, t.y, u.x, u.y) === 1)) {
-      return '<div class="btn-row" style="margin-top:6px;">' +
-        '<button class="ability-btn" data-ability="detonate">DETONATE</button></div>';
+      buttons.push('<button class="ability-btn" data-ability="detonate">DETONATE</button>');
     }
 
-    return '';
+    if (u.equippedItemId === 'negate_attack' && !u.usedNegateAttack) {
+      buttons.push('<button class="ability-btn" data-ability="negate_attack">NEGATE ATTACK</button>');
+    }
+
+    if (u.equippedItemId === 'waboku' && !u.usedWaboku) {
+      buttons.push('<button class="ability-btn" data-ability="waboku">WABOKU</button>');
+    }
+
+    if (u.equippedItemId === 'time_seal' && !u.usedTimeSeal &&
+        units.some(t => t.alive && t.team !== u.team && manhattan(t.x, t.y, u.x, u.y) === 1)) {
+      buttons.push('<button class="ability-btn" data-ability="time_seal">TIME SEAL</button>');
+    }
+
+    if (buttons.length === 0) return '';
+    return '<div class="btn-row" style="margin-top:6px;">' + buttons.join('') + '</div>';
   }
 
   function updateUnitInfo() {
@@ -4012,6 +4210,9 @@
     if (!btn || !selectedUnit || gameOver || currentTurn !== 'player' || aiRunning) return;
     if (btn.dataset.ability === 'sacrifice') armSacrifice();
     else if (btn.dataset.ability === 'detonate') resolveDetonate(selectedUnit);
+    else if (btn.dataset.ability === 'negate_attack') resolveNegateAttack(selectedUnit);
+    else if (btn.dataset.ability === 'waboku') resolveWaboku(selectedUnit);
+    else if (btn.dataset.ability === 'time_seal') armTimeSeal();
   });
 
   endTurnBtn.addEventListener('click', forceEndPlayerTurn);
@@ -4034,6 +4235,7 @@
     draftScreenEl.classList.toggle('hidden', name !== 'draft');
     recruitScreenEl.classList.toggle('hidden', name !== 'recruit');
     squadScreenEl.classList.toggle('hidden', name !== 'squad');
+    itemShopScreenEl.classList.toggle('hidden', name !== 'item-shop');
     gameContainerEl.classList.toggle('hidden', name !== 'battle');
   }
 
@@ -4091,6 +4293,7 @@
     budgetCap = DRAFT_BUDGET;
     recruitPool = generateRecruitPool();
     recruitPoolFrozen = false;
+    ownedItems = [];
     clearedNodes = new Set();
     clearSave();
     showScreen('sideselect');
@@ -4101,6 +4304,7 @@
     budgetCap = DRAFT_BUDGET;
     recruitPool = generateRecruitPool();
     recruitPoolFrozen = false;
+    ownedItems = [];
     clearedNodes = new Set();
     clearSave();
     showScreen('gameover');
@@ -4118,6 +4322,7 @@
     budgetCap = DRAFT_BUDGET;
     recruitPool = generateRecruitPool();
     recruitPoolFrozen = false;
+    ownedItems = [];
     clearedNodes = new Set();
     clearSave();
     showScreen('win');
@@ -4295,7 +4500,10 @@
   function makeRosterEntry(unitId) {
     // bonusAtk: permanent ATK earned via dark_magician_girl's per-ally-death
     // growth (see makeUnit) — 0 and unused for every other unit.
-    return { rosterId: nextRosterId++, unitId, level: 1, xp: 0, bonusAtk: 0 };
+    // equippedItemId: id of the ITEM_DATABASE entry this unit is carrying, or
+    // null if none. See ownedItems below for the shop-purchased-but-unequipped
+    // pool this is drawn from.
+    return { rosterId: nextRosterId++, unitId, level: 1, xp: 0, bonusAtk: 0, equippedItemId: null };
   }
 
   let activeRoster = [];
@@ -4303,6 +4511,24 @@
   let starChips = 0;
   const DRAFT_BUDGET = 10;
   let budgetCap = DRAFT_BUDGET; // raised via home base's "Increase Budget Cap"
+
+  // ---------- Items ----------
+  // Magic/Trap items bought from the Item Shop but not yet equipped to a
+  // roster entry (see makeRosterEntry's equippedItemId above). Each item can
+  // only be owned in one copy at a time across the whole roster — see
+  // isItemOwned, which checks this pool plus every roster entry's
+  // equippedItemId rather than tracking a separate count.
+  let ownedItems = [];
+
+  function isItemOwned(itemId) {
+    return ownedItems.includes(itemId)
+      || activeRoster.some(e => e.equippedItemId === itemId)
+      || bench.some(e => e.equippedItemId === itemId);
+  }
+
+  function activeRosterHasItem(itemId) {
+    return activeRoster.some(e => e.equippedItemId === itemId);
+  }
 
   // Chosen once per run on the Choose Your Side screen: 'hero' or 'rival' locks
   // both the player's draft/recruit pools and the AI's draft pool to that side's
@@ -4438,6 +4664,7 @@
       playerSide,
       recruitPool,
       recruitPoolFrozen,
+      ownedItems,
       clearedNodes: [...clearedNodes],
       nodeObjectives,
       nodeHazards,
@@ -4464,6 +4691,11 @@
       playerSide = data.playerSide || 'any';
       recruitPool = data.recruitPool;
       recruitPoolFrozen = data.recruitPoolFrozen;
+      // Older saves predate items entirely — start with an empty shelf rather
+      // than crashing on a missing field. Roster entries from those saves
+      // simply lack equippedItemId (undefined), which every equip check in
+      // the game treats the same as null.
+      ownedItems = data.ownedItems || [];
       clearedNodes = new Set(data.clearedNodes || []);
       // Older saves predate objectives entirely — roll fresh rather than leaving
       // every node without one. A save from before defend_tile/protect_vip were
@@ -4576,10 +4808,85 @@
     renderHomeScreen();
   });
 
+  // ---------- Item Shop ----------
+  // Unlike Recruit's rotating 5-slot pool, the Item Shop always shows the full,
+  // fixed ITEM_DATABASE — the pool is small enough (8 items) that hiding most
+  // of it behind a respin/freeze mechanic would add friction without real
+  // choice. A card is disabled if unaffordable OR already owned (see
+  // isItemOwned) — every item can only exist in one copy across the whole
+  // roster at a time.
+
+  function renderItemShopScreen() {
+    itemShopStarChipsEl.textContent = starChips;
+
+    itemShopGridEl.innerHTML = Object.keys(ITEM_DATABASE).map(id => {
+      const item = ITEM_DATABASE[id];
+      const owned = isItemOwned(id);
+      const affordable = starChips >= item.cost;
+      const classes = ['unit-card'];
+      if (owned || !affordable) classes.push('disabled');
+      return (
+        '<div class="' + classes.join(' ') + '" data-item-id="' + id + '">' +
+          '<div class="unit-card-inner">' +
+            '<img class="unit-card-thumb" src="' + itemSpritePath(id) + '" alt="">' +
+            '<div class="unit-card-body">' +
+              '<div class="unit-card-header"><span>' + item.name + '</span><span class="unit-card-cost">' + item.cost + '</span></div>' +
+              (owned ? '<div class="unit-card-sub">OWNED</div>' : '') +
+              '<div class="unit-card-effect">' + item.effect + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  itemShopGridEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card || card.classList.contains('disabled')) return;
+    const id = card.dataset.itemId;
+    const item = ITEM_DATABASE[id];
+    if (starChips < item.cost || isItemOwned(id)) return;
+    starChips -= item.cost;
+    ownedItems.push(id);
+    saveGame();
+    renderItemShopScreen();
+  });
+
+  itemShopBtn.addEventListener('click', () => {
+    showScreen('item-shop');
+    renderItemShopScreen();
+  });
+
+  itemShopBackBtn.addEventListener('click', () => {
+    showScreen('home');
+    renderHomeScreen();
+  });
+
   // ---------- Manage Squad ----------
 
   function activeRosterTotal() {
     return activeRoster.reduce((sum, e) => sum + UNIT_DATABASE[e.unitId].cost, 0);
+  }
+
+  // Item id "armed" from the unequipped shelf on the Manage Squad screen —
+  // same arm-then-click-a-target idiom the battle screen already uses for
+  // Horus's sacrifice (see armedAbility). The next click on a roster/bench
+  // card equips this item there instead of moving that unit between active
+  // and bench.
+  let selectedItemForEquip = null;
+
+  function equipItemToEntry(entry, itemId) {
+    if (entry.equippedItemId) ownedItems.push(entry.equippedItemId);
+    entry.equippedItemId = itemId;
+    const idx = ownedItems.indexOf(itemId);
+    if (idx !== -1) ownedItems.splice(idx, 1);
+    selectedItemForEquip = null;
+  }
+
+  function unequipEntry(entry) {
+    if (!entry.equippedItemId) return;
+    ownedItems.push(entry.equippedItemId);
+    entry.equippedItemId = null;
   }
 
   function squadCardHtml(entry, extraClass) {
@@ -4594,6 +4901,9 @@
             '<div class="unit-card-header"><span>' + u.name + '</span><span class="unit-card-cost">' + u.cost + '</span></div>' +
             '<div class="unit-card-sub">' + u.type + ' / ' + u.attribute + '</div>' +
             xpBarHtml(entry) +
+            '<div class="unit-card-sub item-badge" data-unequip-roster-id="' + entry.rosterId + '">' +
+              (entry.equippedItemId ? 'ITEM: ' + ITEM_DATABASE[entry.equippedItemId].name + ' (tap to remove)' : 'No item equipped') +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>'
@@ -4614,15 +4924,53 @@
       return squadCardHtml(e, fits ? '' : 'disabled');
     }).join('') || '<div class="empty-hint">Bench is empty.</div>';
 
+    squadItemsEl.innerHTML = ownedItems.map(id => {
+      const item = ITEM_DATABASE[id];
+      const classes = ['unit-card'];
+      if (id === selectedItemForEquip) classes.push('selected');
+      return '<div class="' + classes.join(' ') + '" data-item-id="' + id + '">' +
+        '<div class="unit-card-inner">' +
+          '<img class="unit-card-thumb" src="' + itemSpritePath(id) + '" alt="">' +
+          '<div class="unit-card-body">' +
+            '<div class="unit-card-header"><span>' + item.name + '</span></div>' +
+            '<div class="unit-card-effect">' + item.effect + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('') || '<div class="empty-hint">No unequipped items. Buy some from the Item Shop.</div>';
+
     const capCost = budgetCap;
     increaseCapBtn.textContent = 'INCREASE BUDGET CAP (' + capCost + ')';
     increaseCapBtn.disabled = starChips < capCost;
   }
 
+  squadItemsEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.unit-card');
+    if (!card) return;
+    const id = card.dataset.itemId;
+    selectedItemForEquip = selectedItemForEquip === id ? null : id;
+    renderSquadScreen();
+  });
+
   squadRosterEl.addEventListener('click', (e) => {
+    const badge = e.target.closest('.item-badge');
+    if (badge) {
+      const entry = findRosterEntry(Number(badge.dataset.unequipRosterId));
+      if (entry) unequipEntry(entry);
+      saveGame();
+      renderSquadScreen();
+      return;
+    }
     const card = e.target.closest('.unit-card');
     if (!card) return;
     const rid = Number(card.dataset.rosterId);
+    if (selectedItemForEquip) {
+      const entry = activeRoster.find(e => e.rosterId === rid);
+      if (entry) equipItemToEntry(entry, selectedItemForEquip);
+      saveGame();
+      renderSquadScreen();
+      return;
+    }
     const idx = activeRoster.findIndex(e => e.rosterId === rid);
     if (idx === -1) return;
     const [entry] = activeRoster.splice(idx, 1);
@@ -4632,9 +4980,24 @@
   });
 
   squadBenchEl.addEventListener('click', (e) => {
+    const badge = e.target.closest('.item-badge');
+    if (badge) {
+      const entry = findRosterEntry(Number(badge.dataset.unequipRosterId));
+      if (entry) unequipEntry(entry);
+      saveGame();
+      renderSquadScreen();
+      return;
+    }
     const card = e.target.closest('.unit-card');
     if (!card || card.classList.contains('disabled')) return;
     const rid = Number(card.dataset.rosterId);
+    if (selectedItemForEquip) {
+      const entry = bench.find(e => e.rosterId === rid);
+      if (entry) equipItemToEntry(entry, selectedItemForEquip);
+      saveGame();
+      renderSquadScreen();
+      return;
+    }
     const idx = bench.findIndex(e => e.rosterId === rid);
     if (idx === -1) return;
     const [entry] = bench.splice(idx, 1);
@@ -4653,11 +5016,13 @@
   });
 
   manageSquadBtn.addEventListener('click', () => {
+    selectedItemForEquip = null;
     showScreen('squad');
     renderSquadScreen();
   });
 
   squadBackBtn.addEventListener('click', () => {
+    selectedItemForEquip = null;
     showScreen('home');
     renderHomeScreen();
   });
@@ -4870,6 +5235,13 @@
     // knockback hit only ever mutates this clone, so every fresh attempt at this
     // node starts every chasm un-collapsed again.
     battleHazards = (nodeHazards[currentNode.id] || []).map(h => ({ ...h }));
+    // Mystical Space Typhoon: clears one random hazard tile off the map before
+    // the fight begins, if anyone in the fielded squad is carrying it.
+    if (activeRosterHasItem('mystical_space_typhoon') && battleHazards.length > 0) {
+      battleHazards.splice(Math.floor(Math.random() * battleHazards.length), 1);
+    }
+    blockUnitDamageThisTurn = false;
+    blockBuildingDamageThisTurn = false;
     pendingPlayerUnits = activeRoster.map(entry => entry.rosterId);
     selectedPlacementRosterId = null;
     selectedUnit = null;
