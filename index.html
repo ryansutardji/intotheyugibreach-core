@@ -5066,8 +5066,56 @@
     return team;
   }
 
-  function draftAITeam(budget) {
-    return fillTeamUnderBudget([], unitIdsForSide(opposingSide(playerSide)), budget);
+  // Nodes gate which units the AI is even allowed to draft, not just how much it
+  // can spend — otherwise a single expensive signature monster could show up in
+  // the very first fight as long as it fit under budget. Breakpoints line up with
+  // the natural gaps in MAP_NODES' budget values (10-11 / 12-14 / 15-16 / boss).
+  function maxEnemyUnitCostForNode(node) {
+    if (node.boss) return Infinity;
+    if (node.budget <= 11) return 4;
+    if (node.budget <= 14) return 6;
+    return 8;
+  }
+
+  // A node's signature Attribute softly biases its AI draft toward matching units
+  // (see weightedEnemyPool) so each map location develops a distinct flavor instead
+  // of every node drawing from the same undifferentiated pool. null = no bias
+  // (Domino City is the unthemed "starter" node; the boss node is intentionally
+  // wide open, same as its unrestricted cost cap).
+  const NODE_SIGNATURE_ATTRIBUTE = {
+    domino_city: null,
+    duelist_kingdom: 'WATER',
+    battle_city: 'LIGHT',
+    pegasus_castle: 'DARK',
+    kaiba_corp: 'LIGHT',
+    noah_virtual_world: 'WIND',
+    waking_the_dragons: 'FIRE',
+    ancient_egypt: 'EARTH',
+    doma: 'DARK',
+    shadow_realm: 'DARK',
+    ceremonial_battle: null,
+  };
+
+  // Duplicates signature-attribute ids in the pool so fillTeamUnderBudget's uniform
+  // random pick favors them ~2:1 without excluding anything else — every unit stays
+  // reachable, just less likely off-theme. (fillTeamUnderBudget already dedupes via
+  // `!team.includes(id)`, so duplicate entries collapse safely once one is picked.)
+  const ATTRIBUTE_WEIGHT_MULTIPLIER = 2;
+
+  function weightedEnemyPool(baseIds, node) {
+    const signature = NODE_SIGNATURE_ATTRIBUTE[node.id];
+    if (!signature) return baseIds;
+    return baseIds.flatMap(id =>
+      UNIT_DATABASE[id].attribute === signature
+        ? Array(ATTRIBUTE_WEIGHT_MULTIPLIER).fill(id)
+        : [id]
+    );
+  }
+
+  function draftAITeam(node) {
+    const costGated = unitIdsForSide(opposingSide(playerSide))
+      .filter(id => UNIT_DATABASE[id].cost <= maxEnemyUnitCostForNode(node));
+    return fillTeamUnderBudget([], weightedEnemyPool(costGated, node), node.budget);
   }
 
   // A boss unit is the fixed, free centerpiece of a boss node — placed before
@@ -5157,7 +5205,7 @@
       return;
     }
 
-    confirmedAiTeam = currentNode.boss ? draftBossTeam(currentNode) : draftAITeam(currentNode.budget);
+    confirmedAiTeam = currentNode.boss ? draftBossTeam(currentNode) : draftAITeam(currentNode);
     // The boss itself is free (not spent from node.budget), so the displayed
     // enemy budget is bumped by its cost too — otherwise the total would read as
     // over budget even though that's by design (see draftBossTeam).
